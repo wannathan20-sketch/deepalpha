@@ -1,0 +1,51 @@
+services:
+  - type: web
+    name: deepalpha-api
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    disk:
+      name: deepalpha-data
+      mountPath: /var/lib/deepalpha
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: LLM_PROVIDER
+        value: deepseek
+      - key: DEEPSEEK_BASE_URL
+        value: https://api.deepseek.com
+      - key: SEARCH_PROVIDER
+        value: tavily
+      - key: ENABLE_DEBUG_ROUTES
+        value: false
+      - key: CORS_ALLOW_ORIGIN_REGEX
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: DEEPALPHA_ACCESS_CODE
+        sync: false
+      - key: DEEPALPHA_DB_PATH
+        value: /var/lib/deepalpha/deepalpha.sqlite3
+      - key: CHROMA_DB_PATH
+        value: /var/lib/deepalpha/chroma
+      - key: SYMBOL_CACHE_TTL_SECONDS
+        value: 86400
+      - key: MARKET_CACHE_TTL_SECONDS
+        value: 300
+      - key: SYMBOL_LOOKUP_RATE_LIMIT
+        value: 60
+      - key: MARKET_CHART_RATE_LIMIT
+        value: 120
+      - key: REPORT_USER_DAILY_LIMIT
+        value: 3
+      - key: REPORT_CREATE_RATE_LIMIT_PER_HOUR
+        value: 5
+      - key: REPORT_CREATE_RATE_LIMIT_PER_DAY
+        value: 10
+      - key: REPORT_GLOBAL_DAILY_LIMIT
+        value: 50

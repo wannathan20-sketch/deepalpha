@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+requests
+python-dotenv
+openai
+pytest
+streamlit
+langgraph
+chromadb

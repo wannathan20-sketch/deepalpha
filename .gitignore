@@ -1,0 +1,16 @@
+.DS_Store
+.env
+.pytest_cache/
+__pycache__/
+*.py[cod]
+
+data/*.json
+data/*.sqlite3
+data/*.db
+data/chroma/
+
+frontend/node_modules/
+frontend/dist/
+
+.venv/
+venv/

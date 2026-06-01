@@ -1,0 +1,166 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-slate-950 text-slate-100 antialiased;
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+pre {
+  white-space: pre-wrap;
+}
+
+.report-document {
+  color: #cbd5e1;
+}
+
+.report-title {
+  border-bottom: 1px solid #1e293b;
+  color: #f8fafc;
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1.5;
+  padding-bottom: 0.65rem;
+}
+
+.report-section-heading {
+  background: linear-gradient(90deg, rgba(8, 145, 178, 0.22), rgba(15, 23, 42, 0));
+  border-left: 3px solid #22d3ee;
+  border-radius: 6px;
+  color: #cffafe;
+  font-size: 0.98rem;
+  font-weight: 750;
+  line-height: 1.45;
+  margin-top: 1rem;
+  padding: 0.65rem 0.8rem;
+}
+
+.report-subheading {
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.5;
+  margin-top: 0.75rem;
+}
+
+.report-paragraph {
+  color: #cbd5e1;
+  font-size: 0.88rem;
+  line-height: 1.85;
+}
+
+.report-list-item,
+.report-numbered-item {
+  align-items: flex-start;
+  color: #cbd5e1;
+  display: flex;
+  font-size: 0.88rem;
+  gap: 0.6rem;
+  line-height: 1.75;
+}
+
+.report-list-dot {
+  background: #22d3ee;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  height: 0.38rem;
+  margin-top: 0.7rem;
+  width: 0.38rem;
+}
+
+.report-number {
+  color: #67e8f9;
+  flex: 0 0 auto;
+  font-weight: 700;
+  min-width: 1.6rem;
+}
+
+.report-link {
+  color: #67e8f9;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.report-link:hover {
+  color: #a5f3fc;
+}
+
+.print-report {
+  display: none;
+}
+
+@media print {
+  @page {
+    margin: 16mm;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .print-report,
+  .print-report * {
+    visibility: visible !important;
+  }
+
+  .print-report {
+    display: block !important;
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    background: #ffffff;
+    color: #0f172a;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .print-report .text-slate-300,
+  .print-report .text-slate-400,
+  .print-report .text-slate-500,
+  .print-report .text-cyan-100,
+  .print-report .text-slate-100,
+  .print-report .report-title,
+  .print-report .report-subheading,
+  .print-report .report-paragraph,
+  .print-report .report-list-item,
+  .print-report .report-numbered-item {
+    color: #0f172a !important;
+  }
+
+  .print-report .report-section-heading {
+    background: #f1f5f9 !important;
+    border-left-color: #0369a1 !important;
+    color: #0f172a !important;
+  }
+
+  .print-report .border-slate-800 {
+    border-color: #cbd5e1 !important;
+  }
+
+  .print-report .bg-slate-950,
+  .print-report .bg-slate-900,
+  .print-report .bg-slate-800 {
+    background: #ffffff !important;
+  }
+
+  .print-report .report-link {
+    color: #0369a1 !important;
+    text-decoration: underline;
+  }
+}
