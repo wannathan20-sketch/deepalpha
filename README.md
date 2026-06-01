@@ -355,6 +355,99 @@ dist
 - 生成报告触发访问码弹窗并能成功生成
 - 达到限额时前端提示“报告生成次数已达当前上限”
 
+## 免绑卡部署：Hugging Face Spaces + Vercel
+
+如果 Render 要求添加付款方式，可以先用 Hugging Face Spaces 托管 FastAPI 后端，Vercel 托管前端。
+
+推荐结构：
+
+```text
+Hugging Face Spaces: Docker/FastAPI 后端
+Vercel: React/Vite 前端
+DeepSeek: LLM
+Tavily: 搜索/RAG 外部检索
+```
+
+### 1. 创建 Hugging Face Space
+
+在 Hugging Face 新建 Space：
+
+- SDK：`Docker`
+- Repository：可以选择导入 GitHub 仓库，或手动同步代码
+- Visibility：演示可设 Public；如不希望公开代码和日志，可设 Private
+
+本项目 Dockerfile 默认监听：
+
+```text
+0.0.0.0:7860
+```
+
+Hugging Face Spaces 会自动使用该端口。
+
+### 2. 配置 Hugging Face Secrets
+
+在 Space 的 Settings -> Variables and secrets 中添加：
+
+```env
+LLM_PROVIDER=deepseek
+DEEPSEEK_API_KEY=你的 DeepSeek API Key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+SEARCH_PROVIDER=tavily
+TAVILY_API_KEY=你的 Tavily API Key
+
+ENABLE_DEBUG_ROUTES=false
+CORS_ALLOW_ORIGIN_REGEX=https://你的 Vercel 前端域名
+
+DEEPALPHA_ACCESS_CODE=给体验用户的访问码
+DEEPALPHA_DB_PATH=/data/deepalpha.sqlite3
+CHROMA_DB_PATH=/data/chroma
+
+REPORT_USER_DAILY_LIMIT=3
+REPORT_CREATE_RATE_LIMIT_PER_HOUR=5
+REPORT_CREATE_RATE_LIMIT_PER_DAY=10
+REPORT_GLOBAL_DAILY_LIMIT=50
+```
+
+注意：免费 Hugging Face Spaces 的文件系统不适合作为长期可靠数据库。演示版可以接受；正式客户试用建议迁移到 VPS、Render/Railway 付费实例，或接外部 Postgres/Redis。
+
+### 3. 验证后端
+
+Space 构建完成后，访问：
+
+```text
+https://你的用户名-你的space名.hf.space/health
+```
+
+返回：
+
+```json
+{"status":"ok"}
+```
+
+表示后端正常。
+
+### 4. 部署前端到 Vercel
+
+Vercel 项目 Root Directory 选择：
+
+```text
+frontend
+```
+
+设置环境变量：
+
+```env
+VITE_API_BASE=https://你的用户名-你的space名.hf.space
+```
+
+部署完成后，回到 Hugging Face Secrets，把：
+
+```env
+CORS_ALLOW_ORIGIN_REGEX=https://你的 Vercel 前端域名
+```
+
+改成真实 Vercel 域名，并重启 Space。
+
 ## API 示例
 
 健康检查：
