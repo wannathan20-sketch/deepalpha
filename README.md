@@ -448,6 +448,72 @@ CORS_ALLOW_ORIGIN_REGEX=https://你的 Vercel 前端域名
 
 改成真实 Vercel 域名，并重启 Space。
 
+## Zeabur 部署：Zeabur + Vercel
+
+Zeabur 支持从 GitHub 创建服务，也支持使用仓库中的 Dockerfile 部署。Zeabur 会通过 `PORT` 环境变量决定服务端口，本项目 Dockerfile 已兼容 `${PORT}`。
+
+### 1. 部署后端到 Zeabur
+
+在 Zeabur 中：
+
+1. 创建 Project
+2. 创建 Service
+3. 选择 GitHub Repository
+4. 选择 `wannathan20-sketch/deepalpha`
+5. 使用根目录 Dockerfile 部署
+
+后端环境变量可参考 `.env.zeabur.example`：
+
+```env
+LLM_PROVIDER=deepseek
+DEEPSEEK_API_KEY=你的 DeepSeek API Key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+SEARCH_PROVIDER=tavily
+TAVILY_API_KEY=你的 Tavily API Key
+
+ENABLE_DEBUG_ROUTES=false
+CORS_ALLOW_ORIGIN_REGEX=https://你的 Vercel 前端域名
+
+DEEPALPHA_ACCESS_CODE=给体验用户的访问码
+DEEPALPHA_DB_PATH=/data/deepalpha.sqlite3
+CHROMA_DB_PATH=/data/chroma
+
+REPORT_USER_DAILY_LIMIT=3
+REPORT_CREATE_RATE_LIMIT_PER_HOUR=5
+REPORT_CREATE_RATE_LIMIT_PER_DAY=10
+REPORT_GLOBAL_DAILY_LIMIT=50
+```
+
+Zeabur 部署完成后，访问：
+
+```text
+https://你的-zeabur-后端域名/health
+```
+
+返回 `{"status":"ok"}` 表示后端正常。
+
+### 2. 部署前端到 Vercel
+
+Vercel 项目 Root Directory：
+
+```text
+frontend
+```
+
+Vercel 环境变量：
+
+```env
+VITE_API_BASE=https://你的-zeabur-后端域名
+```
+
+前端部署完成后，回到 Zeabur，把：
+
+```env
+CORS_ALLOW_ORIGIN_REGEX=https://你的 Vercel 前端域名
+```
+
+改成真实前端域名并重新部署后端。
+
 ## API 示例
 
 健康检查：
