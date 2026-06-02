@@ -658,20 +658,16 @@ function MarketChart({ symbol, displaySymbol, provider, tradingViewSymbol }) {
 
   const points = chartData?.points || [];
   if (!points.length) {
+    const providerLabel = chartData?.provider === "stooq" ? "AUTO" : provider.toUpperCase();
     return (
       <div className="h-[420px] rounded-md border border-slate-800 bg-slate-950 p-4">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="text-sm font-semibold text-slate-100">{displaySymbol || symbol}</div>
             <div className="mt-1 text-xs text-slate-500">
-              TradingView fallback · {provider.toUpperCase()} 暂未返回后端行情点位
+              TradingView fallback · {providerLabel} 暂未返回后端行情点位
             </div>
           </div>
-          {chartData?.error && (
-            <div className="max-w-sm text-right text-xs leading-5 text-amber-100">
-              {chartData.error}
-            </div>
-          )}
         </div>
         <TradingViewFallback symbol={fallbackSymbol} />
         <div className="mt-3 text-xs text-slate-500">
