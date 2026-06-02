@@ -190,8 +190,11 @@ def symbol_lookup(query: str, request: Request) -> dict:
         return {
             "query": query,
             "matched": False,
+            "matches": [],
+            "candidates": [],
+            "needs_confirmation": True,
             "error": str(exc),
-            "source": "yahoo_finance_search",
+            "source": "external_provider",
         }
 
 

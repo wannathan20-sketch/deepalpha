@@ -38,83 +38,20 @@ const RECOMMENDED_COMPANIES = [
   { company: "Google", ticker: "NASDAQ:GOOGL", sector: "Search / AI" },
 ];
 
-const COMPANY_SYMBOLS = [
-  ...RECOMMENDED_COMPANIES.map((item) => ({
-    ...item,
-    aliases: [item.company, item.ticker.replace(/^[^:]+:/, "")],
-  })),
-  { company: "Alphabet", ticker: "NASDAQ:GOOGL", sector: "Search / AI", aliases: ["Google", "GOOGL", "GOOG"] },
-  { company: "Berkshire Hathaway", ticker: "NYSE:BRK.B", sector: "Insurance / Holding", aliases: ["Berkshire", "BRK.B", "BRKB"] },
-  { company: "JPMorgan Chase", ticker: "NYSE:JPM", sector: "Banking", aliases: ["JPMorgan", "JP Morgan", "JPM"] },
-  { company: "Visa", ticker: "NYSE:V", sector: "Payments", aliases: ["Visa", "V"] },
-  { company: "Walmart", ticker: "NYSE:WMT", sector: "Retail", aliases: ["Walmart", "WMT"] },
-  { company: "McDonald's", ticker: "NYSE:MCD", sector: "Restaurants", aliases: ["McDonald's", "McDonalds", "McDonald", "麦当劳", "MCD"] },
-  { company: "Coca-Cola", ticker: "NYSE:KO", sector: "Consumer Staples", aliases: ["Coca Cola", "Coke", "KO"] },
-  { company: "Netflix", ticker: "NASDAQ:NFLX", sector: "Streaming", aliases: ["Netflix", "NFLX"] },
-  { company: "Micron Technology", ticker: "NASDAQ:MU", sector: "Memory / AI Semiconductors", aliases: ["Micron", "Micron Technology", "美光", "美光科技", "MU"] },
-  { company: "AMD", ticker: "NASDAQ:AMD", sector: "Semiconductors", aliases: ["Advanced Micro Devices", "AMD"] },
-  { company: "Nokia", ticker: "OMXHEX:NOKIA", sector: "Telecom Equipment", aliases: ["Nokia", "Nokia Oyj", "诺基亚", "NOKIA", "NOK"] },
-  { company: "Alibaba", ticker: "NYSE:BABA", sector: "China Internet", aliases: ["Alibaba", "阿里巴巴", "BABA"] },
-  { company: "Tencent", ticker: "HKEX:0700", sector: "China Internet", aliases: ["Tencent", "腾讯", "腾讯控股", "0700"] },
-  { company: "Meituan", ticker: "HKEX:3690", yahooSymbol: "3690.HK", sector: "China Local Services", aliases: ["Meituan", "美团", "美团点评", "3690"] },
+const LOCAL_SYMBOL_FALLBACKS = [
   {
-    company: "Xiaomi",
-    ticker: "HKEX:1810",
-    yahooSymbol: "1810.HK",
-    sector: "Consumer Electronics / EV",
-    aliases: ["Xiaomi", "Xiaomi Corporation", "小米", "小米集团", "1810", "XIACY"],
+    symbol: "MU",
+    name: "Micron Technology",
+    company: "Micron Technology",
+    ticker: "NASDAQ:MU",
+    raw_symbol: "MU",
+    exchange: "NASDAQ",
+    market: "US",
+    confidence: 0.9,
+    source: "frontend_fallback",
+    aliases: ["micron", "micron technology", "美光", "美光科技", "mu"],
   },
-  { company: "Baidu", ticker: "NASDAQ:BIDU", sector: "China AI / Search", aliases: ["Baidu", "百度", "BIDU"] },
-  { company: "PDD Holdings", ticker: "NASDAQ:PDD", sector: "China E-commerce", aliases: ["PDD", "拼多多", "Pinduoduo"] },
-  { company: "BYD", ticker: "SZSE:002594", sector: "EV / Battery", aliases: ["BYD", "比亚迪", "002594"] },
-  { company: "Kweichow Moutai", ticker: "SSE:600519", sector: "Consumer Staples", aliases: ["贵州茅台", "茅台", "Moutai", "600519"] },
-  { company: "Contemporary Amperex Technology", ticker: "SZSE:300750", sector: "Battery", aliases: ["CATL", "宁德时代", "300750"] },
 ];
-
-const KNOWN_SYMBOL_ALIASES = new Map(
-  COMPANY_SYMBOLS.flatMap((item) =>
-    [item.company, ...(item.aliases || [])].map((alias) => [alias.toLowerCase(), item]),
-  ),
-);
-
-function resolveCompanySymbol(value) {
-  const query = value.trim();
-  if (!query) return null;
-
-  const normalized = query.toLowerCase();
-  const exact = KNOWN_SYMBOL_ALIASES.get(normalized);
-  if (exact) return exact;
-
-  const fuzzy = COMPANY_SYMBOLS.find((item) =>
-    [item.company, ...(item.aliases || [])].some((alias) => {
-      const normalizedAlias = alias.toLowerCase();
-      if (normalizedAlias.length <= 1) return false;
-      return normalizedAlias.includes(normalized) || normalized.includes(normalizedAlias);
-    }),
-  );
-  if (fuzzy) return fuzzy;
-
-  const explicitExchangeSymbol = query.toUpperCase().replace(/\s+/g, "");
-  if (/^[A-Z0-9._-]{2,12}:[A-Z0-9._-]{1,16}$/.test(explicitExchangeSymbol)) {
-    return {
-      company: query,
-      ticker: explicitExchangeSymbol,
-      sector: "Manual Symbol",
-      aliases: [query],
-    };
-  }
-
-  if (/^\d{4}$/.test(query)) {
-    return { company: query, ticker: `HKEX:${query}`, sector: "HK Symbol", aliases: [query] };
-  }
-
-  if (/^\d{6}$/.test(query)) {
-    const prefix = query.startsWith("6") ? "SSE" : "SZSE";
-    return { company: query, ticker: `${prefix}:${query}`, sector: "CN Symbol", aliases: [query] };
-  }
-
-  return null;
-}
 
 const YAHOO_SUFFIX_BY_EXCHANGE = {
   ASX: "AX",
@@ -132,6 +69,7 @@ const YAHOO_SUFFIX_BY_EXCHANGE = {
 };
 
 function toYahooSymbol(ticker, matchedSymbol) {
+  if (matchedSymbol?.symbol) return matchedSymbol.symbol;
   if (matchedSymbol?.raw_symbol) return matchedSymbol.raw_symbol;
   if (matchedSymbol?.yahooSymbol) return matchedSymbol.yahooSymbol;
 
@@ -144,6 +82,40 @@ function toYahooSymbol(ticker, matchedSymbol) {
 
   const yahooSuffix = YAHOO_SUFFIX_BY_EXCHANGE[exchange];
   return yahooSuffix ? `${symbol}.${yahooSuffix}` : symbol;
+}
+
+function exchangeFromTicker(ticker) {
+  return ticker.includes(":") ? ticker.split(":", 1)[0] : "";
+}
+
+function buildRecommendedSelection(company, ticker) {
+  const yahooSymbol = toYahooSymbol(ticker);
+  return {
+    symbol: yahooSymbol,
+    name: company,
+    company,
+    ticker,
+    raw_symbol: yahooSymbol,
+    exchange: exchangeFromTicker(ticker),
+    market: exchangeFromTicker(ticker),
+    confidence: 1,
+    source: "recommended",
+  };
+}
+
+function findLocalFallbackMatches(query) {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return [];
+
+  return LOCAL_SYMBOL_FALLBACKS.filter((item) =>
+    [item.name, item.company, item.symbol, item.ticker, ...(item.aliases || [])].some((alias) => {
+      const normalizedAlias = String(alias).toLowerCase();
+      return normalizedAlias === normalizedQuery || (
+        normalizedQuery.length > 1 &&
+        (normalizedAlias.includes(normalizedQuery) || normalizedQuery.includes(normalizedAlias))
+      );
+    }),
+  );
 }
 
 function getOrCreateUserId() {
@@ -916,28 +888,28 @@ export default function App() {
   function selectCompany(company, nextTicker) {
     setCompanyName(company);
     setTicker(nextTicker);
-    setRemoteSymbol(null);
+    setRemoteSymbol(buildRecommendedSelection(company, nextTicker));
     setSymbolCandidates([]);
-    setSymbolLookupStatus("searching");
+    setSymbolLookupStatus("selected");
   }
 
   function syncTickerFromCompany(value) {
     setCompanyName(value);
     setRemoteSymbol(null);
     setSymbolCandidates([]);
-    const matched = resolveCompanySymbol(value);
-    if (matched) {
-      setTicker(matched.ticker);
-      setSymbolLookupStatus("searching");
-    } else if (!value.trim()) {
+    if (!value.trim()) {
       setTicker("");
-      setRemoteSymbol(null);
-      setSymbolCandidates([]);
       setSymbolLookupStatus("idle");
     } else {
       setTicker("");
       setSymbolLookupStatus("searching");
     }
+  }
+
+  function selectSymbolCandidate(candidate) {
+    setRemoteSymbol(candidate);
+    setTicker(candidate.ticker || candidate.symbol || "");
+    setSymbolLookupStatus("selected");
   }
 
   async function loadDashboardData(targetCompany = companyName) {
@@ -997,7 +969,11 @@ export default function App() {
 
   useEffect(() => {
     const query = companyName.trim();
-    if (!query) return undefined;
+    if (!query) {
+      setSymbolCandidates([]);
+      setSymbolLookupStatus("idle");
+      return undefined;
+    }
 
     const controller = new AbortController();
     const timeoutId = window.setTimeout(async () => {
@@ -1006,37 +982,20 @@ export default function App() {
         const data = await requestJson(`/symbol/lookup?query=${encodeURIComponent(query)}`, {
           signal: controller.signal,
         });
-        if (!data.matched) {
-          setRemoteSymbol(null);
-          setSymbolCandidates([]);
-          setSymbolLookupStatus("not_found");
+        const matches = data.matches || data.candidates || [];
+        if (!data.matched || !matches.length) {
+          const fallbackMatches = findLocalFallbackMatches(query);
+          setSymbolCandidates(fallbackMatches);
+          setSymbolLookupStatus(fallbackMatches.length ? "candidates" : "not_found");
           return;
         }
-        const fallbackMatch = resolveCompanySymbol(query);
-        if (data.needs_confirmation && fallbackMatch) {
-          setRemoteSymbol(fallbackMatch);
-          setSymbolCandidates(data.candidates || []);
-          setTicker(fallbackMatch.ticker);
-          setSymbolLookupStatus("fallback");
-          return;
-        }
-        setRemoteSymbol(data);
-        setSymbolCandidates(data.candidates || []);
-        setTicker(data.ticker);
-        setSymbolLookupStatus("remote");
+        setSymbolCandidates(matches);
+        setSymbolLookupStatus("candidates");
       } catch (err) {
         if (!controller.signal.aborted) {
-          const fallbackMatch = resolveCompanySymbol(query);
-          if (fallbackMatch) {
-            setRemoteSymbol(fallbackMatch);
-            setSymbolCandidates([]);
-            setTicker(fallbackMatch.ticker);
-            setSymbolLookupStatus("fallback");
-          } else {
-            setRemoteSymbol(null);
-            setSymbolCandidates([]);
-            setSymbolLookupStatus("not_found");
-          }
+          const fallbackMatches = findLocalFallbackMatches(query);
+          setSymbolCandidates(fallbackMatches);
+          setSymbolLookupStatus(fallbackMatches.length ? "candidates" : "not_found");
         }
       }
     }, 500);
@@ -1050,6 +1009,10 @@ export default function App() {
   async function runReport() {
     if (!companyName.trim()) {
       setError("请输入公司名称。");
+      return;
+    }
+    if (!matchedSymbol || !ticker.trim()) {
+      setError("请先从候选股票中选择一个结果。");
       return;
     }
 
@@ -1137,12 +1100,11 @@ export default function App() {
   }
 
   const selectedHistory = history[selectedHistoryIndex];
-  const localMatchedSymbol = resolveCompanySymbol(companyName);
-  const matchedSymbol = remoteSymbol || localMatchedSymbol;
-  const needsConfirmation = Boolean(remoteSymbol?.needs_confirmation && symbolCandidates.length > 1);
+  const matchedSymbol = remoteSymbol;
+  const needsConfirmation = Boolean(symbolCandidates.length > 1 && !matchedSymbol);
   const yahooSymbol = toYahooSymbol(ticker, matchedSymbol);
-  const selectedCompanyName = matchedSymbol?.company || companyName.trim();
-  const selectedExchange = matchedSymbol?.exchange || matchedSymbol?.sector || "Auto";
+  const selectedCompanyName = matchedSymbol?.name || matchedSymbol?.company || companyName.trim();
+  const selectedExchange = matchedSymbol?.exchange || matchedSymbol?.market || "Auto";
   const selectedConfidence = typeof matchedSymbol?.confidence === "number" ? `${Math.round(matchedSymbol.confidence * 100)}%` : "N/A";
 
   if (page === "intro") {
@@ -1265,16 +1227,8 @@ export default function App() {
                   className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-cyan-400"
                   value={companyName}
                   onChange={(event) => syncTickerFromCompany(event.target.value)}
-                  list="company-symbol-options"
-                  placeholder="输入公司名，例如 麦当劳、Shell、腾讯、Nokia"
+                  placeholder="输入公司名、简称、拼音或股票代码，例如 美团、阿里、BABA"
                 />
-                <datalist id="company-symbol-options">
-                  {COMPANY_SYMBOLS.map((item) => (
-                    <option value={item.company} key={`${item.company}-${item.ticker}`}>
-                      {item.ticker}
-                    </option>
-                  ))}
-                </datalist>
               </label>
             </div>
 
@@ -1293,40 +1247,46 @@ export default function App() {
                   正在解析公司和股票代码...
                 </div>
               ) : symbolLookupStatus === "not_found" ? (
-                <p className="text-sm text-amber-100">暂未匹配到股票代码，请尝试输入更完整的公司名称。</p>
+                <p className="text-sm text-amber-100">未找到，请换关键词。</p>
+              ) : symbolCandidates.length ? (
+                <p className="text-sm text-slate-400">请从下方候选股票中选择一个结果。</p>
               ) : (
-                <p className="text-sm text-slate-500">输入公司名称后，系统会自动选择最可能的上市股票。</p>
+                <p className="text-sm text-slate-500">输入关键词后，系统会返回候选股票列表。</p>
               )}
               {matchedSymbol && (
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                   <span>{selectedExchange}</span>
                   {matchedSymbol.source && <span>{matchedSymbol.source}</span>}
-                  {symbolLookupStatus === "fallback" && <span>本地兜底匹配</span>}
                 </div>
               )}
             </div>
 
-            {symbolCandidates.length > 1 && (
+            {symbolCandidates.length > 0 && (
               <div className="mt-3 rounded-md border border-slate-800 bg-slate-950/70 p-3">
                 <div className="mb-2 text-xs text-slate-500">候选股票</div>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid gap-2">
                   {symbolCandidates.slice(0, 5).map((candidate) => (
                     <button
                       className={classNames(
-                        "rounded-md border px-2 py-1 text-xs",
-                        ticker === candidate.ticker
+                        "rounded-md border px-3 py-2 text-left text-sm transition",
+                        ticker === (candidate.ticker || candidate.symbol)
                           ? "border-cyan-400 bg-cyan-500/10 text-cyan-100"
                           : "border-slate-700 text-slate-300 hover:border-cyan-400 hover:text-cyan-200",
                       )}
-                      key={`${candidate.raw_symbol}-${candidate.exchange}`}
-                      onClick={() => {
-                        setRemoteSymbol(candidate);
-                        setTicker(candidate.ticker);
-                        setSymbolLookupStatus("remote");
-                      }}
+                      key={`${candidate.symbol}-${candidate.exchange}`}
+                      onClick={() => selectSymbolCandidate(candidate)}
                       type="button"
                     >
-                      {candidate.company} · {candidate.raw_symbol} · {candidate.exchange}
+                      <span className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-semibold">{candidate.name || candidate.company}</span>
+                        <span className="text-xs text-cyan-200">{candidate.symbol}</span>
+                      </span>
+                      <span className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                        <span>{candidate.exchange}</span>
+                        <span>{candidate.market}</span>
+                        <span>{Math.round((candidate.confidence || 0) * 100)}%</span>
+                        <span>{candidate.source}</span>
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -1335,7 +1295,7 @@ export default function App() {
 
             {needsConfirmation && (
               <p className="mt-3 rounded-md border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
-                该公司名称存在多个候选股票，系统已自动选择一个结果。可在候选股票中切换。
+                该关键词存在多个候选股票，请选择具体上市市场后再生成报告。
               </p>
             )}
 

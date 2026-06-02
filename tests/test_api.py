@@ -85,7 +85,40 @@ def test_symbol_lookup_empty_query() -> None:
 
     assert response.status_code == 200
     assert data["matched"] is False
+    assert data["matches"] == []
     assert "cache_hit" in data
+
+
+def test_symbol_lookup_meituan_prefers_hk_alias() -> None:
+    response = client.get("/symbol/lookup", params={"query": "美团"})
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["matches"][0]["symbol"] == "3690.HK"
+    assert data["matches"][0]["exchange"] == "HKEX"
+    assert data["matches"][0]["market"] == "HK"
+    assert data["matches"][0]["source"] == "alias"
+    assert data["matches"][0]["confidence"] >= 0.9
+
+
+def test_symbol_lookup_alibaba_returns_hk_and_us() -> None:
+    response = client.get("/symbol/lookup", params={"query": "阿里"})
+    data = response.json()
+    symbols = [match["symbol"] for match in data["matches"]]
+
+    assert response.status_code == 200
+    assert "9988.HK" in symbols
+    assert "BABA" in symbols
+    assert data["needs_confirmation"] is True
+
+
+def test_symbol_lookup_exact_symbol() -> None:
+    response = client.get("/symbol/lookup", params={"query": "BABA"})
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["matches"][0]["symbol"] == "BABA"
+    assert data["matches"][0]["source"] == "exact_symbol"
 
 
 def test_market_chart_empty_symbol() -> None:
