@@ -588,11 +588,18 @@ function TradingViewFallback({ symbol }) {
 function MarketChart({ symbol, displaySymbol, provider, tradingViewSymbol }) {
   const [chartData, setChartData] = useState(null);
   const [chartStatus, setChartStatus] = useState("idle");
+  const fallbackSymbol = tradingViewSymbol || displaySymbol || symbol;
 
   useEffect(() => {
     if (!symbol) {
       setChartData(null);
       setChartStatus("idle");
+      return undefined;
+    }
+
+    if (provider === "tradingview") {
+      setChartData(null);
+      setChartStatus("tradingview");
       return undefined;
     }
 
@@ -632,9 +639,25 @@ function MarketChart({ symbol, displaySymbol, provider, tradingViewSymbol }) {
     );
   }
 
+  if (provider === "tradingview" || chartStatus === "tradingview") {
+    return (
+      <div className="h-[420px] rounded-md border border-slate-800 bg-slate-950 p-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-slate-100">{displaySymbol || symbol}</div>
+            <div className="mt-1 text-xs text-slate-500">TradingView · 实时嵌入 K 线</div>
+          </div>
+        </div>
+        <TradingViewFallback symbol={fallbackSymbol} />
+        <div className="mt-3 text-xs text-slate-500">
+          当前使用 TradingView 直接加载图表，不请求后端行情源。
+        </div>
+      </div>
+    );
+  }
+
   const points = chartData?.points || [];
   if (!points.length) {
-    const fallbackSymbol = tradingViewSymbol || displaySymbol || symbol;
     return (
       <div className="h-[420px] rounded-md border border-slate-800 bg-slate-950 p-4">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -1327,6 +1350,7 @@ export default function App() {
                 <option value="auto">Auto</option>
                 <option value="yahoo">Yahoo</option>
                 <option value="stooq">Stooq</option>
+                <option value="tradingview">TradingView</option>
               </select>
             }
           >
