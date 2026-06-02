@@ -1,4 +1,5 @@
 import csv
+import os
 from datetime import datetime
 from io import StringIO
 from urllib.parse import quote
@@ -90,13 +91,32 @@ def get_stooq_chart(symbol: str, range_: str = "6mo", interval: str = "1d") -> d
 
     response = requests.get(
         "https://stooq.com/q/d/l/",
-        params={"s": stooq_symbol, "i": "d"},
+        params={
+            "s": stooq_symbol,
+            "i": "d",
+            **({"apikey": os.getenv("STOOQ_API_KEY", "").strip()} if os.getenv("STOOQ_API_KEY", "").strip() else {}),
+        },
         headers={"User-Agent": "DeepAlpha/0.1"},
         timeout=10,
     )
     response.raise_for_status()
 
     rows = list(csv.DictReader(StringIO(response.text)))
+    if rows and "Get your apikey" in next(iter(rows[0].keys()), ""):
+        return {
+            "provider": "stooq",
+            "symbol": stooq_symbol,
+            "source_symbol": normalized_symbol,
+            "currency": "",
+            "exchange": "Stooq",
+            "regular_market_price": None,
+            "range": range_,
+            "interval": interval,
+            "yahoo_chart_url": f"https://stooq.com/q/?s={quote(stooq_symbol)}",
+            "points": [],
+            "error": "Stooq CSV API requires STOOQ_API_KEY",
+        }
+
     points = []
     for row in rows[-140:]:
         try:
@@ -136,7 +156,13 @@ def get_market_chart(symbol: str, provider: str = "auto", range_: str = "6mo", i
     if normalized_provider == "stooq":
         return get_stooq_chart(symbol, range_, interval)
 
-    yahoo_data = get_yahoo_chart(symbol, range_, interval)
+    yahoo_error = None
+    try:
+        yahoo_data = get_yahoo_chart(symbol, range_, interval)
+    except requests.RequestException as exc:
+        yahoo_error = str(exc)
+        yahoo_data = {"points": []}
+
     if yahoo_data.get("points"):
         yahoo_data["provider"] = "yahoo"
         yahoo_data["provider_mode"] = "auto"
@@ -144,4 +170,6 @@ def get_market_chart(symbol: str, provider: str = "auto", range_: str = "6mo", i
 
     stooq_data = get_stooq_chart(symbol, range_, interval)
     stooq_data["provider_mode"] = "auto"
+    if yahoo_error:
+        stooq_data["fallback_error"] = yahoo_error
     return stooq_data

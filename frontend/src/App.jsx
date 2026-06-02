@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowLeft,
@@ -556,6 +556,54 @@ function DeepAlphaLogo({ compact = false }) {
   );
 }
 
+function TradingViewFallback({ symbol }) {
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!containerRef.current || !symbol) return undefined;
+
+    containerRef.current.innerHTML = "";
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-symbol-overview.js";
+    script.async = true;
+    script.innerHTML = JSON.stringify({
+      symbols: [[symbol, symbol]],
+      chartOnly: false,
+      width: "100%",
+      height: "320",
+      locale: "zh_CN",
+      colorTheme: "dark",
+      autosize: false,
+      showVolume: true,
+      showMA: true,
+      hideDateRanges: false,
+      hideMarketStatus: false,
+      hideSymbolLogo: false,
+      scalePosition: "right",
+      scaleMode: "Normal",
+      fontFamily: "-apple-system, BlinkMacSystemFont, Trebuchet MS, Roboto, Ubuntu, sans-serif",
+      fontSize: "10",
+      noTimeScale: false,
+      valuesTracking: "1",
+      changeMode: "price-and-percent",
+      chartType: "candlesticks",
+      maLineColor: "#089981",
+      maLineWidth: 1,
+      maLength: 9,
+      lineWidth: 2,
+      lineType: 0,
+      dateRanges: ["1d|1", "1m|30", "3m|60", "6m|120", "12m|1D", "all|1M"],
+    });
+    containerRef.current.appendChild(script);
+
+    return () => {
+      if (containerRef.current) containerRef.current.innerHTML = "";
+    };
+  }, [symbol]);
+
+  return <div ref={containerRef} className="h-[320px] w-full overflow-hidden rounded-md bg-slate-950" />;
+}
+
 function MarketChart({ symbol, displaySymbol, provider, tradingViewSymbol }) {
   const [chartData, setChartData] = useState(null);
   const [chartStatus, setChartStatus] = useState("idle");
@@ -605,9 +653,26 @@ function MarketChart({ symbol, displaySymbol, provider, tradingViewSymbol }) {
 
   const points = chartData?.points || [];
   if (!points.length) {
+    const fallbackSymbol = tradingViewSymbol || displaySymbol || symbol;
     return (
-      <div className="flex h-[420px] items-center justify-center rounded-md border border-slate-800 bg-slate-950/70 px-6 text-center text-sm text-slate-400">
-        {provider.toUpperCase()} 暂未返回 {symbol} 的行情数据，可切换 provider 或选择其他候选股票。
+      <div className="h-[420px] rounded-md border border-slate-800 bg-slate-950 p-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-slate-100">{displaySymbol || symbol}</div>
+            <div className="mt-1 text-xs text-slate-500">
+              TradingView fallback · {provider.toUpperCase()} 暂未返回后端行情点位
+            </div>
+          </div>
+          {chartData?.error && (
+            <div className="max-w-sm text-right text-xs leading-5 text-amber-100">
+              {chartData.error}
+            </div>
+          )}
+        </div>
+        <TradingViewFallback symbol={fallbackSymbol} />
+        <div className="mt-3 text-xs text-slate-500">
+          后端行情源不可用时，图表由 TradingView 直接加载。
+        </div>
       </div>
     );
   }
