@@ -118,6 +118,12 @@ function findLocalFallbackMatches(query) {
   );
 }
 
+function shouldAutoSelectSymbol(matches, data = {}) {
+  if (matches.length !== 1) return false;
+  if (data.needs_confirmation === false) return true;
+  return (matches[0].confidence || 0) >= 0.9;
+}
+
 function getOrCreateUserId() {
   const existing = window.localStorage.getItem(USER_ID_STORAGE_KEY);
   if (existing) return existing;
@@ -1004,16 +1010,28 @@ export default function App() {
         if (!data.matched || !matches.length) {
           const fallbackMatches = findLocalFallbackMatches(query);
           setSymbolCandidates(fallbackMatches);
-          setSymbolLookupStatus(fallbackMatches.length ? "candidates" : "not_found");
+          if (shouldAutoSelectSymbol(fallbackMatches)) {
+            selectSymbolCandidate(fallbackMatches[0]);
+          } else {
+            setSymbolLookupStatus(fallbackMatches.length ? "candidates" : "not_found");
+          }
           return;
         }
         setSymbolCandidates(matches);
-        setSymbolLookupStatus("candidates");
+        if (shouldAutoSelectSymbol(matches, data)) {
+          selectSymbolCandidate(matches[0]);
+        } else {
+          setSymbolLookupStatus("candidates");
+        }
       } catch (err) {
         if (!controller.signal.aborted) {
           const fallbackMatches = findLocalFallbackMatches(query);
           setSymbolCandidates(fallbackMatches);
-          setSymbolLookupStatus(fallbackMatches.length ? "candidates" : "not_found");
+          if (shouldAutoSelectSymbol(fallbackMatches)) {
+            selectSymbolCandidate(fallbackMatches[0]);
+          } else {
+            setSymbolLookupStatus(fallbackMatches.length ? "candidates" : "not_found");
+          }
         }
       }
     }, 500);
