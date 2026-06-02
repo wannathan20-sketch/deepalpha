@@ -51,6 +51,7 @@ const COMPANY_SYMBOLS = [
   { company: "McDonald's", ticker: "NYSE:MCD", sector: "Restaurants", aliases: ["McDonald's", "McDonalds", "McDonald", "麦当劳", "MCD"] },
   { company: "Coca-Cola", ticker: "NYSE:KO", sector: "Consumer Staples", aliases: ["Coca Cola", "Coke", "KO"] },
   { company: "Netflix", ticker: "NASDAQ:NFLX", sector: "Streaming", aliases: ["Netflix", "NFLX"] },
+  { company: "Micron Technology", ticker: "NASDAQ:MU", sector: "Memory / AI Semiconductors", aliases: ["Micron", "Micron Technology", "美光", "美光科技", "MU"] },
   { company: "AMD", ticker: "NASDAQ:AMD", sector: "Semiconductors", aliases: ["Advanced Micro Devices", "AMD"] },
   { company: "Nokia", ticker: "OMXHEX:NOKIA", sector: "Telecom Equipment", aliases: ["Nokia", "Nokia Oyj", "诺基亚", "NOKIA", "NOK"] },
   { company: "Alibaba", ticker: "NYSE:BABA", sector: "China Internet", aliases: ["Alibaba", "阿里巴巴", "BABA"] },

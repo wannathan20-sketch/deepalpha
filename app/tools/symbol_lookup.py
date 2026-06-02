@@ -70,6 +70,16 @@ EXCHANGE_PREFIX_MAP = {
     "VI": "VIE",
 }
 
+LOCAL_SYMBOLS = [
+    {
+        "company": "Micron Technology",
+        "ticker": "NASDAQ:MU",
+        "raw_symbol": "MU",
+        "exchange": "NMS",
+        "aliases": ["micron", "micron technology", "美光", "美光科技", "mu"],
+    },
+]
+
 
 def _format_tradingview_symbol(symbol: str, exchange: str = "") -> str:
     clean_symbol = symbol.strip().upper()
@@ -91,6 +101,40 @@ def _format_tradingview_symbol(symbol: str, exchange: str = "") -> str:
 
 def _yahoo_chart_url(symbol: str) -> str:
     return f"https://finance.yahoo.com/chart/{quote(symbol)}"
+
+
+def _local_lookup(query: str) -> dict | None:
+    normalized_query = query.strip().lower()
+    if not normalized_query:
+        return None
+
+    for item in LOCAL_SYMBOLS:
+        aliases = [item["company"], item["ticker"], item["raw_symbol"], *item.get("aliases", [])]
+        normalized_aliases = [alias.lower() for alias in aliases]
+        exact_match = normalized_query in normalized_aliases
+        fuzzy_match = any(
+            len(normalized_query) > 1 and (normalized_query in alias or alias in normalized_query)
+            for alias in normalized_aliases
+        )
+        if exact_match or fuzzy_match:
+            result = {
+                "query": query,
+                "matched": True,
+                "company": item["company"],
+                "ticker": item["ticker"],
+                "raw_symbol": item["raw_symbol"],
+                "exchange": item["exchange"],
+                "quote_type": "EQUITY",
+                "score": 120 if exact_match else 95,
+                "source": "local_symbol_fallback",
+                "yahoo_chart_url": _yahoo_chart_url(item["raw_symbol"]),
+                "confidence": 0.9 if exact_match else 0.72,
+                "needs_confirmation": False,
+            }
+            result["candidates"] = [dict(result)]
+            return result
+
+    return None
 
 
 def _quote_name(item: dict) -> str:
@@ -149,6 +193,10 @@ def lookup_symbol(query: str) -> dict:
     normalized_query = query.strip()
     if not normalized_query:
         return {"query": query, "matched": False}
+
+    local_match = _local_lookup(normalized_query)
+    if local_match:
+        return local_match
 
     response = requests.get(
         f"https://query2.finance.yahoo.com/v1/finance/search?q={quote(normalized_query)}",
