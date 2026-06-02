@@ -563,38 +563,46 @@ function TradingViewFallback({ symbol }) {
     if (!containerRef.current || !symbol) return undefined;
 
     containerRef.current.innerHTML = "";
+    const widgetContainer = document.createElement("div");
+    widgetContainer.className = "tradingview-widget-container";
+    widgetContainer.style.height = "100%";
+    widgetContainer.style.width = "100%";
+
+    const widget = document.createElement("div");
+    widget.className = "tradingview-widget-container__widget";
+    widget.style.height = "100%";
+    widget.style.width = "100%";
+
     const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-symbol-overview.js";
+    script.type = "text/javascript";
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
     script.async = true;
-    script.innerHTML = JSON.stringify({
-      symbols: [[symbol, symbol]],
-      chartOnly: false,
-      width: "100%",
-      height: "320",
+    script.text = JSON.stringify({
+      autosize: true,
+      symbol,
+      interval: "D",
+      timezone: "Etc/UTC",
+      theme: "dark",
+      style: "1",
       locale: "zh_CN",
-      colorTheme: "dark",
-      autosize: false,
-      showVolume: true,
-      showMA: true,
-      hideDateRanges: false,
-      hideMarketStatus: false,
-      hideSymbolLogo: false,
-      scalePosition: "right",
-      scaleMode: "Normal",
-      fontFamily: "-apple-system, BlinkMacSystemFont, Trebuchet MS, Roboto, Ubuntu, sans-serif",
-      fontSize: "10",
-      noTimeScale: false,
-      valuesTracking: "1",
-      changeMode: "price-and-percent",
-      chartType: "candlesticks",
-      maLineColor: "#089981",
-      maLineWidth: 1,
-      maLength: 9,
-      lineWidth: 2,
-      lineType: 0,
-      dateRanges: ["1d|1", "1m|30", "3m|60", "6m|120", "12m|1D", "all|1M"],
+      allow_symbol_change: true,
+      calendar: false,
+      details: false,
+      hide_side_toolbar: true,
+      hide_top_toolbar: false,
+      hide_legend: false,
+      hide_volume: false,
+      hotlist: false,
+      save_image: false,
+      withdateranges: true,
+      backgroundColor: "#020617",
+      gridColor: "rgba(30, 41, 59, 0.65)",
+      studies: [],
+      support_host: "https://www.tradingview.com",
     });
-    containerRef.current.appendChild(script);
+    widgetContainer.appendChild(widget);
+    widgetContainer.appendChild(script);
+    containerRef.current.appendChild(widgetContainer);
 
     return () => {
       if (containerRef.current) containerRef.current.innerHTML = "";
