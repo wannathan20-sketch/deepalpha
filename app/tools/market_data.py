@@ -1,24 +1,6 @@
-import csv
-import os
-from datetime import datetime
-from io import StringIO
 from urllib.parse import quote
 
 import requests
-
-
-STOOQ_SUFFIX_BY_YAHOO_SUFFIX = {
-    "AX": "au",
-    "DE": "de",
-    "HK": "hk",
-    "L": "uk",
-    "MI": "it",
-    "PA": "fr",
-    "SS": "cn",
-    "SZ": "cn",
-    "TO": "ca",
-    "T": "jp",
-}
 
 
 def get_yahoo_chart(symbol: str, range_: str = "6mo", interval: str = "1d") -> dict:
@@ -70,91 +52,11 @@ def get_yahoo_chart(symbol: str, range_: str = "6mo", interval: str = "1d") -> d
     }
 
 
-def _to_stooq_symbol(symbol: str) -> str:
-    normalized_symbol = symbol.strip().lower()
-    if not normalized_symbol:
-        return ""
-
-    if "." not in normalized_symbol:
-        return f"{normalized_symbol}.us"
-
-    base_symbol, suffix = normalized_symbol.rsplit(".", 1)
-    stooq_suffix = STOOQ_SUFFIX_BY_YAHOO_SUFFIX.get(suffix.upper(), suffix)
-    return f"{base_symbol}.{stooq_suffix}"
-
-
-def get_stooq_chart(symbol: str, range_: str = "6mo", interval: str = "1d") -> dict:
-    normalized_symbol = symbol.strip()
-    stooq_symbol = _to_stooq_symbol(normalized_symbol)
-    if not stooq_symbol:
-        return {"provider": "stooq", "symbol": symbol, "points": []}
-
-    response = requests.get(
-        "https://stooq.com/q/d/l/",
-        params={
-            "s": stooq_symbol,
-            "i": "d",
-            **({"apikey": os.getenv("STOOQ_API_KEY", "").strip()} if os.getenv("STOOQ_API_KEY", "").strip() else {}),
-        },
-        headers={"User-Agent": "DeepAlpha/0.1"},
-        timeout=10,
-    )
-    response.raise_for_status()
-
-    rows = list(csv.DictReader(StringIO(response.text)))
-    if rows and "Get your apikey" in next(iter(rows[0].keys()), ""):
-        return {
-            "provider": "stooq",
-            "symbol": stooq_symbol,
-            "source_symbol": normalized_symbol,
-            "currency": "",
-            "exchange": "Stooq",
-            "regular_market_price": None,
-            "range": range_,
-            "interval": interval,
-            "yahoo_chart_url": f"https://stooq.com/q/?s={quote(stooq_symbol)}",
-            "points": [],
-            "error": "Stooq CSV API requires STOOQ_API_KEY",
-        }
-
-    points = []
-    for row in rows[-140:]:
-        try:
-            close = float(row["Close"])
-            points.append(
-                {
-                    "time": int(datetime.strptime(row["Date"], "%Y-%m-%d").timestamp()),
-                    "open": float(row["Open"]),
-                    "high": float(row["High"]),
-                    "low": float(row["Low"]),
-                    "close": close,
-                    "volume": int(float(row.get("Volume") or 0)),
-                }
-            )
-        except (KeyError, TypeError, ValueError):
-            continue
-
-    return {
-        "provider": "stooq",
-        "symbol": stooq_symbol,
-        "source_symbol": normalized_symbol,
-        "currency": "",
-        "exchange": "Stooq",
-        "regular_market_price": points[-1]["close"] if points else None,
-        "range": range_,
-        "interval": interval,
-        "yahoo_chart_url": f"https://stooq.com/q/?s={quote(stooq_symbol)}",
-        "points": points,
-    }
-
-
 def get_market_chart(symbol: str, provider: str = "auto", range_: str = "6mo", interval: str = "1d") -> dict:
     normalized_provider = provider.strip().lower() or "auto"
 
     if normalized_provider == "yahoo":
         return get_yahoo_chart(symbol, range_, interval)
-    if normalized_provider == "stooq":
-        return get_stooq_chart(symbol, range_, interval)
 
     yahoo_error = None
     try:
@@ -168,8 +70,13 @@ def get_market_chart(symbol: str, provider: str = "auto", range_: str = "6mo", i
         yahoo_data["provider_mode"] = "auto"
         return yahoo_data
 
-    stooq_data = get_stooq_chart(symbol, range_, interval)
-    stooq_data["provider_mode"] = "auto"
+    empty_data = {
+        "provider": "auto",
+        "symbol": symbol,
+        "range": range_,
+        "interval": interval,
+        "points": [],
+    }
     if yahoo_error:
-        stooq_data["fallback_error"] = yahoo_error
-    return stooq_data
+        empty_data["error"] = yahoo_error
+    return empty_data

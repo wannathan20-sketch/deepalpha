@@ -117,7 +117,7 @@ VITE_API_BASE=https://api.example.com
 React 前端使用 Tailwind CSS + Lucide Icons，主界面为三栏投研工作台：
 
 - 左侧：推荐标的与 Watchlist
-- 中间：公司搜索、候选股票、Yahoo/Stooq K 线、报告生成
+- 中间：公司搜索、候选股票、Yahoo/TradingView K 线、报告生成
 - 右侧：报告结果与历史记录
 
 生产环境建议关闭调试接口，并将 CORS 限制为正式前端域名：

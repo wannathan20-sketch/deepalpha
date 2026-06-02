@@ -1349,7 +1349,6 @@ export default function App() {
               >
                 <option value="auto">Auto</option>
                 <option value="yahoo">Yahoo</option>
-                <option value="stooq">Stooq</option>
                 <option value="tradingview">TradingView</option>
               </select>
             }

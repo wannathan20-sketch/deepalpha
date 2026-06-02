@@ -16,7 +16,7 @@ DeepAlpha，中文名“深研 Alpha”，目标是构建一个面向公司研�
 - LangGraph 工作流：负责多 Agent 编排和 thread-level short-term memory。
 - Agent 层：Planner、Industry、Fundamental、Technical、News、Sentiment、Bull、Bear、Trader、Risk、Committee。
 - RAG 层：Tavily/mock 搜索结果进入 Chroma，本地 hash embedding 支撑最小可运行检索。
-- Market Data 层：公司名称解析、Yahoo/Stooq 行情、6 个月行情摘要、MA20/MA60、趋势和波动率计算。
+- Market Data 层：公司名称解析、Yahoo 行情、TradingView 前端图表兜底、6 个月行情摘要、MA20/MA60、趋势和波动率计算。
 - Memory 层：SQLite 保存历史报告和 Watchlist，预留 tenant/user 字段。
 - React/Vite 前端：三栏投研工作台、公司搜索、候选股票、K 线 provider、报告结果、历史记录、PDF 导出。
 - Streamlit 旧前端：`frontend.py` 保留为轻量调试入口。
@@ -28,7 +28,7 @@ DeepAlpha，中文名“深研 Alpha”，目标是构建一个面向公司研�
 ↓
 前端自动解析股票代码与候选股票
 ↓
-前端展示 Yahoo/Stooq K 线
+前端展示 Yahoo/TradingView K 线
 ↓
 POST /report/tasks 创建异步报告任务
 ↓
@@ -74,7 +74,7 @@ Citation Checker
 - `GET /debug/architecture`：架构诊断，受 `ENABLE_DEBUG_ROUTES` 控制。
 - `GET /debug/rag`：RAG/Chroma 检索诊断，受 `ENABLE_DEBUG_ROUTES` 控制。
 - `GET /symbol/lookup`：公司名到股票代码自动解析。
-- `GET /market/chart`：Yahoo/Stooq/auto K 线数据。
+- `GET /market/chart`：Yahoo/auto K 线数据；前端可直接使用 TradingView 图表。
 - `POST /analyze`：开发调试用完整分析接口。
 - `POST /report`：同步报告接口。
 - `POST /report/tasks`：异步报告任务创建。
@@ -125,7 +125,7 @@ LLM：
 - `/symbol/lookup` 支持公司名自动解析股票代码。
 - 本地 fallback mappings 覆盖常见美股、港股、A 股名称。
 - Yahoo Finance search 用于扩大自动匹配范围。
-- `/market/chart` 支持 `auto`、`yahoo`、`stooq` provider。
+- `/market/chart` 支持 `auto`、`yahoo` provider。
 - 前端 K 线可切换 provider，并提供 Yahoo/TradingView 外部链接。
 - 后端报告生成前会基于请求中的 symbol/yahoo_symbol/provider 构建 6 个月行情摘要。
 - Technical Agent 和报告正文已接入 latest close、6M return、high/low、MA20/MA60、trend、volatility。
@@ -185,7 +185,7 @@ Memory：
 
 - 财务报表、公告、HKEX/SEC filings、电话会纪要尚未正式接入。
 - 新闻正文抓取、网页正文抽取和高质量行业数据库尚未接入。
-- Yahoo/Stooq 行情适合作为公开行情辅助，但不等同于机构级行情源。
+- Yahoo/TradingView 行情适合作为公开行情辅助，但不等同于机构级行情源。
 - K 线 provider 目前不含富途、致富证券、同花顺等需授权或非公开接口的 provider。
 
 RAG：
@@ -298,7 +298,7 @@ RAG：
 - `app/report_generator.py`：Markdown 报告生成。
 - `app/agents/llm_helpers.py`：Agent 文本清洗、结构化输出 helpers。
 - `app/tools/symbol_lookup.py`：公司名到股票代码匹配。
-- `app/tools/market_data.py`：Yahoo/Stooq 行情 provider。
+- `app/tools/market_data.py`：Yahoo 行情 provider。
 - `app/services/market_summary.py`：行情摘要指标计算。
 - `app/memory/store.py`：SQLite 历史记录和 Watchlist。
 - `frontend/src/App.jsx`：React 工作台主界面。
@@ -335,9 +335,9 @@ Memory 使用 SQLite：
 
 行情 provider 保持可替换：
 
-- 当前实现 Yahoo/Stooq/auto。
-- 前端保留 provider 切换。
-- TradingView 目前作为外部跳转，不作为后端数据源。
+- 当前实现 Yahoo/auto。
+- 前端保留 provider 切换，并支持 TradingView 图表。
+- TradingView 作为前端图表源，不作为后端数据源。
 - 富途、致富证券、同花顺等需要授权、网关或官方接口后再接入。
 
 Agent 输出逐步结构化：

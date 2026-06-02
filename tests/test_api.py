@@ -122,7 +122,7 @@ def test_symbol_lookup_exact_symbol() -> None:
 
 
 def test_market_chart_empty_symbol() -> None:
-    for provider in ("auto", "yahoo", "stooq"):
+    for provider in ("auto", "yahoo"):
         response = client.get("/market/chart", params={"symbol": "   ", "provider": provider})
         data = response.json()
 
