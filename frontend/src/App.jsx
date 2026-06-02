@@ -1343,7 +1343,6 @@ export default function App() {
                 onChange={(event) => setMarketProvider(event.target.value)}
               >
                 <option value="auto">Auto</option>
-                <option value="yahoo">Yahoo</option>
                 <option value="tradingview">TradingView</option>
               </select>
             }
