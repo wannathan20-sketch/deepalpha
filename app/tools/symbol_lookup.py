@@ -105,6 +105,8 @@ STOCK_MASTER: tuple[StockMaster, ...] = (
     StockMaster("GOOGL", "Alphabet", "NASDAQ", "US", "USD", ("alphabet", "google", "谷歌", "googl", "goog"), 88),
     StockMaster("MU", "Micron Technology", "NASDAQ", "US", "USD", ("micron", "micron technology", "美光", "美光科技", "mu"), 87),
     StockMaster("AMD", "Advanced Micro Devices", "NASDAQ", "US", "USD", ("amd", "advanced micro devices", "超威半导体"), 87),
+    StockMaster("MRVL", "Marvell Technology", "NASDAQ", "US", "USD", ("marvell", "marvell technology", "迈威尔", "美满电子", "mrvl"), 87),
+    StockMaster("NOKIA.HE", "Nokia Oyj", "OMXHEX", "FI", "EUR", ("nokia", "nokia oyj", "诺基亚", "诺基亚公司", "nok", "nokia.hel", "nokia.he"), 86),
     StockMaster("MCD", "McDonald's", "NYSE", "US", "USD", ("mcdonald's", "mcdonalds", "麦当劳", "mcd"), 86),
 )
 

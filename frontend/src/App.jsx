@@ -51,6 +51,30 @@ const LOCAL_SYMBOL_FALLBACKS = [
     source: "frontend_fallback",
     aliases: ["micron", "micron technology", "美光", "美光科技", "mu"],
   },
+  {
+    symbol: "NOKIA.HE",
+    name: "Nokia Oyj",
+    company: "Nokia Oyj",
+    ticker: "OMXHEX:NOKIA",
+    raw_symbol: "NOKIA.HE",
+    exchange: "OMXHEX",
+    market: "FI",
+    confidence: 0.9,
+    source: "frontend_fallback",
+    aliases: ["nokia", "nokia oyj", "诺基亚", "诺基亚公司", "nok", "nokia.hel", "nokia.he"],
+  },
+  {
+    symbol: "MRVL",
+    name: "Marvell Technology",
+    company: "Marvell Technology",
+    ticker: "NASDAQ:MRVL",
+    raw_symbol: "MRVL",
+    exchange: "NASDAQ",
+    market: "US",
+    confidence: 0.9,
+    source: "frontend_fallback",
+    aliases: ["marvell", "marvell technology", "迈威尔", "美满电子", "mrvl"],
+  },
 ];
 
 const YAHOO_SUFFIX_BY_EXCHANGE = {
@@ -116,6 +140,16 @@ function findLocalFallbackMatches(query) {
       );
     }),
   );
+}
+
+function getTradingViewUrl(symbol, query = "") {
+  if (symbol) {
+    return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}`;
+  }
+  if (query.trim()) {
+    return `https://www.tradingview.com/search/?query=${encodeURIComponent(query.trim())}`;
+  }
+  return "https://www.tradingview.com/markets/stocks-usa/market-movers-large-cap/";
 }
 
 function shouldAutoSelectSymbol(matches, data = {}) {
@@ -591,10 +625,11 @@ function TradingViewFallback({ symbol }) {
   return <div ref={containerRef} className="h-[320px] w-full overflow-hidden rounded-md bg-slate-950" />;
 }
 
-function MarketChart({ symbol, displaySymbol, provider, tradingViewSymbol }) {
+function MarketChart({ symbol, displaySymbol, provider, tradingViewSymbol, searchQuery = "" }) {
   const [chartData, setChartData] = useState(null);
   const [chartStatus, setChartStatus] = useState("idle");
   const fallbackSymbol = tradingViewSymbol || displaySymbol || symbol;
+  const tradingViewUrl = getTradingViewUrl(fallbackSymbol, searchQuery);
 
   useEffect(() => {
     if (!symbol) {
@@ -630,8 +665,16 @@ function MarketChart({ symbol, displaySymbol, provider, tradingViewSymbol }) {
 
   if (!symbol) {
     return (
-      <div className="flex h-[420px] items-center justify-center rounded-md border border-slate-800 bg-slate-950/70 text-sm text-slate-400">
-        请输入或选择股票代码以查看 K 线。
+      <div className="flex h-[420px] flex-col items-center justify-center gap-3 rounded-md border border-slate-800 bg-slate-950/70 px-6 text-center text-sm text-slate-400">
+        <div>请输入或选择股票代码以查看 K 线。</div>
+        <a
+          className="inline-flex rounded-md border border-cyan-300/40 px-3 py-2 text-xs text-cyan-100 hover:border-cyan-300"
+          href={tradingViewUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          去 TradingView 搜索
+        </a>
       </div>
     );
   }
@@ -702,10 +745,6 @@ function MarketChart({ symbol, displaySymbol, provider, tradingViewSymbol }) {
   const changePercent = first.close ? (change / first.close) * 100 : 0;
   const isUp = change >= 0;
   const latestDate = new Date(latest.time * 1000).toLocaleDateString("zh-CN");
-  const tradingViewUrl = tradingViewSymbol
-    ? `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tradingViewSymbol)}`
-    : "";
-
   return (
     <div className="h-[420px] rounded-md border border-slate-800 bg-slate-950 p-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -731,16 +770,14 @@ function MarketChart({ symbol, displaySymbol, provider, tradingViewSymbol }) {
             >
               打开来源 K 线
             </a>
-            {tradingViewUrl && (
-              <a
-                className="inline-flex rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-cyan-400 hover:text-cyan-200"
-                href={tradingViewUrl}
-                rel="noreferrer"
-                target="_blank"
-              >
-                打开 TradingView
-              </a>
-            )}
+            <a
+              className="inline-flex rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-cyan-400 hover:text-cyan-200"
+              href={tradingViewUrl}
+              rel="noreferrer"
+              target="_blank"
+            >
+              打开 TradingView
+            </a>
           </div>
         </div>
       </div>
@@ -1365,7 +1402,13 @@ export default function App() {
               </select>
             }
           >
-            <MarketChart displaySymbol={ticker} provider={marketProvider} symbol={yahooSymbol} tradingViewSymbol={ticker} />
+            <MarketChart
+              displaySymbol={ticker}
+              provider={marketProvider}
+              searchQuery={companyName}
+              symbol={yahooSymbol}
+              tradingViewSymbol={ticker}
+            />
           </Panel>
         </section>
 
