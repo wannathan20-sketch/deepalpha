@@ -34,6 +34,7 @@ def _render_executive_summary(
     final_report: dict,
     team_results: dict,
     market_profile: dict,
+    financial_profile: dict,
 ) -> list[str]:
     bull_points = team_results.get("bull", {}).get("key_points", [])
     bear_points = team_results.get("bear", {}).get("key_points", [])
@@ -52,6 +53,14 @@ def _render_executive_summary(
             f"6 个月区间回报 {market_profile.get('period_return_percent')}%，"
             f"趋势判断为 {market_profile.get('trend')}。"
         )
+    financial_line = "财报数据暂不可用，财务事实需后续补充。"
+    if financial_profile.get("enabled"):
+        financial_line = (
+            f"{financial_profile.get('filing_type', 'SEC filing')} / {financial_profile.get('fiscal_period', '最新披露期')}，"
+            f"收入 {financial_profile.get('revenue', '待补充')}，"
+            f"净利润 {financial_profile.get('net_income', '待补充')}，"
+            f"经营现金流 {financial_profile.get('operating_cash_flow', '待补充')}。"
+        )
 
     return [
         "## Executive Summary",
@@ -61,6 +70,7 @@ def _render_executive_summary(
         f"- 置信度：{_sanitize_text(final_report.get('confidence', '待补充'))}",
         f"- 核心矛盾：{core_conflict}",
         f"- 行情摘要：{_sanitize_text(market_line)}",
+        f"- 财报锚点：{_sanitize_text(financial_line)}",
         f"- 关键风险：{_first_item(risk_points, '需补充最新公告、财报和估值数据后再复核。')}",
         (
             "- 来源质量："
@@ -168,6 +178,7 @@ def generate_markdown_report(
     final_report: dict,
     memory: dict | None = None,
     market_profile: dict | None = None,
+    financial_profile: dict | None = None,
 ) -> str:
     lines = [
         f"# 深研 Alpha 投研报告：{company_name}",
@@ -179,6 +190,7 @@ def generate_markdown_report(
             final_report,
             team_results,
             market_profile or {},
+            financial_profile or {},
         )
     )
     lines.extend(["## 1. 研究计划", ""])
@@ -220,6 +232,36 @@ def generate_markdown_report(
         )
     else:
         lines.append(f"暂无可用行情摘要。{_sanitize_text(market_profile.get('reason', ''))}")
+
+    lines.extend(["", "## 财报数据摘要", ""])
+    financial_profile = financial_profile or {}
+    if financial_profile.get("enabled"):
+        lines.extend(
+            [
+                f"- Symbol：{_sanitize_text(financial_profile.get('symbol', ''))}",
+                f"- Source：{_sanitize_text(financial_profile.get('source', ''))}",
+                f"- Filing：{_sanitize_text(financial_profile.get('filing_type', ''))} / {_sanitize_text(financial_profile.get('fiscal_period', ''))}",
+                f"- Report Date：{_sanitize_text(financial_profile.get('report_date', ''))}",
+                f"- Revenue：{_sanitize_text(financial_profile.get('revenue', ''))}",
+                f"- Gross Margin：{_sanitize_text(financial_profile.get('gross_margin_percent', ''))}%",
+                f"- Operating Margin：{_sanitize_text(financial_profile.get('operating_margin_percent', ''))}%",
+                f"- Net Income：{_sanitize_text(financial_profile.get('net_income', ''))}",
+                f"- EPS Diluted：{_sanitize_text(financial_profile.get('eps_diluted', ''))}",
+                f"- Operating Cash Flow：{_sanitize_text(financial_profile.get('operating_cash_flow', ''))}",
+                f"- Free Cash Flow：{_sanitize_text(financial_profile.get('free_cash_flow', ''))}",
+                f"- Cash / Debt：{_sanitize_text(financial_profile.get('cash', ''))} / {_sanitize_text(financial_profile.get('debt', ''))}",
+                f"- Total Assets / Liabilities：{_sanitize_text(financial_profile.get('total_assets', ''))} / {_sanitize_text(financial_profile.get('total_liabilities', ''))}",
+            ]
+        )
+        filing_url = _sanitize_url(financial_profile.get("filing_url", ""))
+        if filing_url and filing_url != "#":
+            lines.append(f"- Filing URL：[SEC]({filing_url})")
+        summary_items = financial_profile.get("summary", [])
+        if summary_items:
+            lines.extend(["", "结构化摘要："])
+            lines.extend(_render_key_points(summary_items))
+    else:
+        lines.append(f"暂无可用 SEC 财报摘要。{_sanitize_text(financial_profile.get('reason', ''))}")
 
     sections = [
         ("## 2. 行业研究分析", "industry"),

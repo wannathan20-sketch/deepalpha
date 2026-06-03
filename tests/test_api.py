@@ -19,6 +19,16 @@ def isolated_database(tmp_path, monkeypatch) -> None:
     from app.services.rate_limit import rate_limiter
 
     monkeypatch.setattr(store, "DATABASE_PATH", tmp_path / "test_deepalpha.sqlite3")
+    monkeypatch.setattr(
+        "app.main.build_financial_profile",
+        lambda symbol, exchange="": {
+            "enabled": False,
+            "symbol": symbol,
+            "source": "sec_companyfacts",
+            "reason": "test financial profile disabled",
+            "summary": ["test financial profile disabled"],
+        },
+    )
     cache._items.clear()
     rate_limiter._hits.clear()
 
@@ -141,6 +151,39 @@ def test_market_chart_rate_limit(monkeypatch) -> None:
     assert second_response.status_code == 429
 
 
+def test_financials_latest(monkeypatch) -> None:
+    def fake_build_financial_profile(symbol: str, exchange: str = "") -> dict:
+        return {
+            "enabled": True,
+            "symbol": symbol,
+            "source": "sec_companyfacts",
+            "fiscal_period": "FY2026 Q2",
+            "filing_type": "10-Q",
+            "revenue": 1516000000,
+            "gross_profit": 712000000,
+            "gross_margin_percent": 46.97,
+            "net_income": 185000000,
+            "operating_cash_flow": 320000000,
+            "cash": 980000000,
+            "debt": 420000000,
+            "filing_url": "https://www.sec.gov/Archives/edgar/data/1/test.htm",
+            "summary": ["最新披露收入为 1,516,000,000。"],
+        }
+
+    monkeypatch.setattr("app.main.build_financial_profile", fake_build_financial_profile)
+
+    response = client.get("/financials/latest", params={"symbol": "MRVL", "exchange": "NASDAQ"})
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["enabled"] is True
+    assert data["source"] == "sec_companyfacts"
+    assert data["filing_type"] == "10-Q"
+    assert data["revenue"] == 1516000000
+    assert data["gross_margin_percent"] == 46.97
+    assert data["cache_hit"] is False
+
+
 def test_analyze() -> None:
     response = client.post("/analyze", json={"company_name": "OpenAI"})
     data = response.json()
@@ -158,6 +201,7 @@ def test_analyze() -> None:
     assert "markdown_report" in data
     assert "report_editor" in data
     assert "market_profile" in data
+    assert "financial_profile" in data
     assert "citation_check" in data
     assert "passed" in data["citation_check"]
     assert "checked_agents" in data["citation_check"]
@@ -178,6 +222,7 @@ def test_analyze() -> None:
     assert "data_quality" in valuation
     assert "Executive Summary" in data["markdown_report"]
     assert "核心矛盾" in data["markdown_report"]
+    assert "财报数据摘要" in data["markdown_report"]
     assert "估值与情景分析" in data["markdown_report"]
     assert "source_ratings" in source_quality
     assert "grade_counts" in source_quality
@@ -240,6 +285,7 @@ def test_report() -> None:
     assert "citation_check" in data
     assert "trace_summary" in data
     assert "行情数据摘要" in data["markdown_report"]
+    assert "财报数据摘要" in data["markdown_report"]
     assert "trace_id" in data["trace_summary"]
     assert "duration_seconds" in data["trace_summary"]
     assert "steps_count" in data["trace_summary"]

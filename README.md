@@ -68,8 +68,11 @@ DEEPALPHA_ACCESS_CODE=
 DEEPALPHA_DB_PATH=data/deepalpha.sqlite3
 SYMBOL_CACHE_TTL_SECONDS=86400
 MARKET_CACHE_TTL_SECONDS=300
+FINANCIALS_CACHE_TTL_SECONDS=21600
 SYMBOL_LOOKUP_RATE_LIMIT=60
 MARKET_CHART_RATE_LIMIT=120
+FINANCIALS_RATE_LIMIT=60
+SEC_USER_AGENT=DeepAlpha research prototype contact@example.com
 REPORT_USER_DAILY_LIMIT=3
 REPORT_CREATE_RATE_LIMIT_PER_HOUR=5
 REPORT_CREATE_RATE_LIMIT_PER_DAY=10
@@ -145,8 +148,11 @@ data/deepalpha.sqlite3
 
 - `SYMBOL_CACHE_TTL_SECONDS`：公司名解析缓存时间，默认 86400 秒
 - `MARKET_CACHE_TTL_SECONDS`：K 线缓存时间，默认 300 秒
+- `FINANCIALS_CACHE_TTL_SECONDS`：SEC 财报摘要缓存时间，默认 21600 秒
 - `SYMBOL_LOOKUP_RATE_LIMIT`：每分钟 symbol lookup 次数，默认 60
 - `MARKET_CHART_RATE_LIMIT`：每分钟 K 线请求次数，默认 120
+- `FINANCIALS_RATE_LIMIT`：每分钟 SEC 财报摘要请求次数，默认 60
+- `SEC_USER_AGENT`：SEC EDGAR 请求 User-Agent，生产环境请改为明确项目和联系邮箱
 - `DEEPALPHA_ACCESS_CODE`：报告生成访问码；为空时不启用访问码保护
 - `REPORT_USER_DAILY_LIMIT`：每个浏览器用户每天最多生成报告数，默认 3，设为 0 可关闭
 - `REPORT_CREATE_RATE_LIMIT_PER_HOUR`：每个 IP 每小时最多生成报告数，默认 5，设为 0 可关闭
@@ -166,6 +172,14 @@ curl http://127.0.0.1:8000/report/tasks/{task_id}
 ```
 
 如果请求中提供 `symbol`、`yahoo_symbol` 和 `data_provider`，后端会在生成报告前拉取 6 个月日线行情，计算最新价、区间涨跌幅、6 个月高低点、MA20/MA60、趋势和年化波动率，并写入 Technical Agent 上下文与 Markdown 报告的“行情数据摘要”章节。
+
+美股标的会额外尝试接入 SEC EDGAR companyfacts：
+
+```bash
+curl "http://127.0.0.1:8000/financials/latest?symbol=MRVL&exchange=NASDAQ"
+```
+
+该接口会完成 ticker -> CIK -> companyfacts/latest filing metadata 的最小闭环，抽取收入、毛利率、营业利润率、净利润、EPS、经营现金流、CapEx、现金、债务、资产、负债和股东权益，并写入 Financial Analyst、Valuation Analyst 和 Markdown 报告的“财报数据摘要”章节。当前 MVP 主要覆盖美股；港股/A 股需后续接 HKEX、交易所披露或授权数据源。
 
 如需启用 Tavily 真实搜索：
 

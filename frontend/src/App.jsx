@@ -261,6 +261,15 @@ function CompactMetric({ label, value, tone = "slate" }) {
   );
 }
 
+function formatFinancialValue(value) {
+  if (value === null || value === undefined || value === "") return "N/A";
+  if (typeof value !== "number") return value;
+  const absValue = Math.abs(value);
+  if (absValue >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`;
+  if (absValue >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  return value.toLocaleString("en-US");
+}
+
 function safeReportUrl(url) {
   if (!url || url === "#") return "#";
 
@@ -270,6 +279,65 @@ function safeReportUrl(url) {
   } catch (err) {
     return "#";
   }
+}
+
+function LatestFinancials({ profile, status }) {
+  if (status === "loading") {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-950/70 p-3 text-sm text-slate-400">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        正在加载 SEC 最新财报...
+      </div>
+    );
+  }
+
+  if (!profile) {
+    return <p className="text-sm text-slate-500">选择美股标的后会自动加载 SEC 最新财报摘要。</p>;
+  }
+
+  if (!profile.enabled) {
+    return (
+      <div className="rounded-md border border-amber-400/25 bg-amber-400/10 p-3 text-sm leading-6 text-amber-100">
+        {profile.reason || "暂无可用 SEC 财报摘要。"}
+      </div>
+    );
+  }
+
+  const filingUrl = safeReportUrl(profile.filing_url);
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-slate-800 bg-slate-950/70 p-3">
+        <div>
+          <div className="text-sm font-semibold text-slate-100">{profile.company_name || profile.symbol}</div>
+          <div className="mt-1 text-xs text-slate-500">
+            {profile.filing_type || "SEC"} · {profile.fiscal_period || profile.report_date || "latest filing"}
+          </div>
+        </div>
+        {filingUrl !== "#" && (
+          <a
+            className="inline-flex rounded-md border border-cyan-300/40 px-2 py-1 text-xs text-cyan-100 hover:border-cyan-300"
+            href={filingUrl}
+            rel="noreferrer"
+            target="_blank"
+          >
+            SEC
+          </a>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+        <CompactMetric label="收入" value={formatFinancialValue(profile.revenue)} tone="cyan" />
+        <CompactMetric label="净利润" value={formatFinancialValue(profile.net_income)} tone="emerald" />
+        <CompactMetric label="毛利率" value={profile.gross_margin_percent == null ? "N/A" : `${profile.gross_margin_percent}%`} tone="slate" />
+        <CompactMetric label="经营现金流" value={formatFinancialValue(profile.operating_cash_flow)} tone="amber" />
+      </div>
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+        <CompactMetric label="营业利润率" value={profile.operating_margin_percent == null ? "N/A" : `${profile.operating_margin_percent}%`} />
+        <CompactMetric label="EPS" value={formatFinancialValue(profile.eps_diluted)} />
+        <CompactMetric label="现金" value={formatFinancialValue(profile.cash)} />
+        <CompactMetric label="债务" value={formatFinancialValue(profile.debt)} />
+      </div>
+    </div>
+  );
 }
 
 function extractExecutiveSummary(content) {
@@ -936,6 +1004,8 @@ export default function App() {
   const [symbolCandidates, setSymbolCandidates] = useState([]);
   const [symbolLookupStatus, setSymbolLookupStatus] = useState("idle");
   const [marketProvider, setMarketProvider] = useState("auto");
+  const [financialProfile, setFinancialProfile] = useState(null);
+  const [financialStatus, setFinancialStatus] = useState("idle");
   const [error, setError] = useState("");
   const [accessCodeInput, setAccessCodeInput] = useState(() => window.localStorage.getItem(ACCESS_CODE_STORAGE_KEY) || "");
   const [accessCodePromptOpen, setAccessCodePromptOpen] = useState(false);
@@ -958,6 +1028,8 @@ export default function App() {
     setCompanyName(value);
     setRemoteSymbol(null);
     setSymbolCandidates([]);
+    setFinancialProfile(null);
+    setFinancialStatus("idle");
     if (!value.trim()) {
       setTicker("");
       setSymbolLookupStatus("idle");
@@ -1180,6 +1252,35 @@ export default function App() {
   const selectedExchange = matchedSymbol?.exchange || matchedSymbol?.market || "Auto";
   const selectedConfidence = typeof matchedSymbol?.confidence === "number" ? `${Math.round(matchedSymbol.confidence * 100)}%` : "N/A";
 
+  useEffect(() => {
+    if (!matchedSymbol || !yahooSymbol) {
+      setFinancialProfile(null);
+      setFinancialStatus("idle");
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setFinancialStatus("loading");
+    requestJson(`/financials/latest?symbol=${encodeURIComponent(yahooSymbol)}&exchange=${encodeURIComponent(matchedSymbol.exchange || "")}`, {
+      signal: controller.signal,
+    })
+      .then((data) => {
+        setFinancialProfile(data);
+        setFinancialStatus(data.enabled ? "ready" : "empty");
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setFinancialProfile({
+            enabled: false,
+            reason: "财报数据加载失败，请确认后端或 SEC 连接状态。",
+          });
+          setFinancialStatus("empty");
+        }
+      });
+
+    return () => controller.abort();
+  }, [matchedSymbol, yahooSymbol]);
+
   if (page === "intro") {
     return <ProjectIntro onBack={() => setPage("home")} />;
   }
@@ -1386,6 +1487,10 @@ export default function App() {
             {reportTaskStatus && (
               <p className="mt-3 text-xs text-slate-500">报告任务状态：{reportTaskStatus}</p>
             )}
+          </Panel>
+
+          <Panel title="最新财报" icon={FileText}>
+            <LatestFinancials profile={financialProfile} status={financialStatus} />
           </Panel>
 
           <Panel

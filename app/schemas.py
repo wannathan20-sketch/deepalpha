@@ -46,6 +46,7 @@ class AnalyzeResponse(BaseModel):
     markdown_report: str
     report_editor: dict[str, Any]
     market_profile: dict[str, Any]
+    financial_profile: dict[str, Any]
     citation_check: dict[str, Any]
     trace: dict[str, Any]
 

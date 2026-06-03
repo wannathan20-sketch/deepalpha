@@ -33,6 +33,7 @@ class DeepAlphaState(TypedDict):
     thread_id: str
     company_name: str
     market_profile: dict
+    financial_profile: dict
     research_plan: dict
     context: dict
     rag_chunks: list[dict]
@@ -90,6 +91,7 @@ def planner_node(state: DeepAlphaState) -> DeepAlphaState:
     context = {
         "company_name": state["company_name"],
         "market_profile": state.get("market_profile", {}),
+        "financial_profile": state.get("financial_profile", {}),
         "research_plan": research_plan,
         "agent_outputs": {},
         "memory": {"recent_history": recent_history},
@@ -235,6 +237,7 @@ def report_node(state: DeepAlphaState) -> DeepAlphaState:
         state["final_report"],
         state["context"].get("memory", {}),
         state["context"].get("market_profile", {}),
+        state["context"].get("financial_profile", {}),
     )
     trace = state["trace"]
     add_trace_step(trace, "report_generated", "success", "Markdown report generated.")
@@ -339,6 +342,7 @@ def run_deepalpha_graph(
     company_name: str,
     thread_id: str | None = None,
     market_profile: dict | None = None,
+    financial_profile: dict | None = None,
 ) -> dict:
     if thread_id is None:
         thread_id = str(uuid4())
@@ -350,6 +354,7 @@ def run_deepalpha_graph(
         "thread_id": thread_id,
         "company_name": company_name,
         "market_profile": market_profile or {},
+        "financial_profile": financial_profile or {},
         "research_plan": {},
         "context": {},
         "rag_chunks": [],
@@ -380,6 +385,7 @@ def run_deepalpha_graph(
         "markdown_report": final_state["markdown_report"],
         "report_editor": final_state["report_editor_result"],
         "market_profile": final_state.get("market_profile", {}),
+        "financial_profile": final_state.get("financial_profile", {}),
         "citation_check": final_state["citation_check"],
         "trace": final_state["trace"],
     }

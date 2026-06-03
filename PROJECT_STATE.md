@@ -14,9 +14,10 @@ DeepAlpha，中文名“深研 Alpha”，目标是构建一个面向公司研�
 
 - FastAPI 后端：负责 API、异步报告任务、Memory、限流、缓存、日志和前端数据接口。
 - LangGraph 工作流：负责多 Agent 编排和 thread-level short-term memory。
-- Agent 层：Planner、Industry、Fundamental、Technical、News、Sentiment、Bull、Bear、Trader、Risk、Committee。
+- Agent 层：Planner、Industry、Fundamental、Financial、Valuation、Technical、News、Sentiment、Bull、Bear、Trader、Risk、Source Quality、Report Editor、Committee。
 - RAG 层：Tavily/mock 搜索结果进入 Chroma，本地 hash embedding 支撑最小可运行检索。
-- Market Data 层：公司名称解析、Yahoo 行情、TradingView 前端图表兜底、6 个月行情摘要、MA20/MA60、趋势和波动率计算。
+- Market Data 层：公司名称解析、本地股票主表、Yahoo 行情摘要兜底、TradingView 前端图表、6 个月行情摘要、MA20/MA60、趋势和波动率计算。
+- Financial Data 层：美股 SEC EDGAR companyfacts MVP，支持 ticker -> CIK -> 最新 10-K/10-Q metadata -> 核心 XBRL 财务字段提取。
 - Memory 层：SQLite 保存历史报告和 Watchlist，预留 tenant/user 字段。
 - React/Vite 前端：三栏投研工作台、公司搜索、候选股票、K 线 provider、报告结果、历史记录、PDF 导出。
 - Streamlit 旧前端：`frontend.py` 保留为轻量调试入口。
@@ -28,7 +29,7 @@ DeepAlpha，中文名“深研 Alpha”，目标是构建一个面向公司研�
 ↓
 前端自动解析股票代码与候选股票
 ↓
-前端展示 Yahoo/TradingView K 线
+前端展示 TradingView K 线，并提供 TradingView 搜索/图表跳转
 ↓
 POST /report/tasks 创建异步报告任务
 ↓
@@ -41,6 +42,10 @@ RAG Retriever
 Industry Analyst
 ↓
 Fundamental Analyst
+↓
+Financial Analyst
+↓
+Valuation Analyst
 ↓
 Technical Analyst
 ↓
@@ -56,7 +61,11 @@ Trader Agent
 ↓
 Risk Manager
 ↓
+Source Quality Agent
+↓
 Committee Agent
+↓
+Report Editor Agent
 ↓
 Markdown Report Generator
 ↓
@@ -74,7 +83,8 @@ Citation Checker
 - `GET /debug/architecture`：架构诊断，受 `ENABLE_DEBUG_ROUTES` 控制。
 - `GET /debug/rag`：RAG/Chroma 检索诊断，受 `ENABLE_DEBUG_ROUTES` 控制。
 - `GET /symbol/lookup`：公司名到股票代码自动解析。
-- `GET /market/chart`：Yahoo/auto K 线数据；前端可直接使用 TradingView 图表。
+- `GET /market/chart`：Yahoo/auto 行情摘要数据；前端主要使用 TradingView 图表。
+- `GET /financials/latest`：美股 SEC companyfacts 最新财报摘要。
 - `POST /analyze`：开发调试用完整分析接口。
 - `POST /report`：同步报告接口。
 - `POST /report/tasks`：异步报告任务创建。
@@ -93,7 +103,7 @@ Citation Checker
 - `/config` 运行模式诊断。
 - debug 路由可通过 `ENABLE_DEBUG_ROUTES=false` 关闭。
 - Dockerfile、`.dockerignore`、`.gitignore`。
-- pytest API 测试，目前 `13 passed, 1 warning`。
+- pytest API 测试，目前 `22 passed, 1 warning`。
 
 多 Agent 与 LangGraph：
 
@@ -103,7 +113,7 @@ Citation Checker
 - `safe_run_agent` 提供 Agent 失败降级。
 - Trace step 记录每个节点执行状态。
 - 关键 Agent 已开始结构化输出，新增 `verdict`、`claims`、`risks`、`watch_items`、`data_quality` 字段。
-- `Fundamental / Technical / News / Risk / Committee` 已接入结构化输出协议。
+- `Fundamental / Financial / Valuation / Technical / News / Risk / Source Quality / Report Editor / Committee` 已接入结构化输出协议。
 
 RAG 与检索：
 
@@ -122,13 +132,23 @@ LLM：
 
 行情与股票代码：
 
-- `/symbol/lookup` 支持公司名自动解析股票代码。
-- 本地 fallback mappings 覆盖常见美股、港股、A 股名称。
-- Yahoo Finance search 用于扩大自动匹配范围。
+- `/symbol/lookup` 支持公司名、中文别名、英文名和股票代码自动解析股票代码。
+- 本地 `STOCK_MASTER` 股票主表覆盖常见美股、港股、A 股名称，并已补充美光、MRVL、诺基亚等演示标的。
+- Yahoo Finance search 仅作为补充扩大自动匹配范围；由于线上可能被限流，核心体验不依赖 Yahoo。
 - `/market/chart` 支持 `auto`、`yahoo` provider。
-- 前端 K 线可切换 provider，并提供 Yahoo/TradingView 外部链接。
+- 前端 K 线保留 `Auto` / `TradingView` 切换，并提供 TradingView 外部链接；没有匹配到股票时可跳转 TradingView 搜索。
 - 后端报告生成前会基于请求中的 symbol/yahoo_symbol/provider 构建 6 个月行情摘要。
 - Technical Agent 和报告正文已接入 latest close、6M return、high/low、MA20/MA60、trend、volatility。
+
+SEC 财报数据：
+
+- 新增 `app/tools/sec_filings.py`，支持 SEC company ticker mapping、companyfacts 和 latest submissions metadata。
+- 新增 `app/services/financials.py`，从 companyfacts 中提取 Revenue、Gross Profit、Operating Income、Net Income、EPS、Operating Cash Flow、CapEx、Cash、Debt、Assets、Liabilities、Equity，并计算毛利率、营业利润率、净利率、FCF 和可比期变化。
+- 新增 `GET /financials/latest`，返回最新 SEC 财报摘要并加入缓存、限流和结构化日志。
+- 报告生成前会构建 `financial_profile` 并注入 LangGraph context。
+- Financial Analyst 和 Valuation Analyst 已优先使用 SEC 财务事实作为财务分析和估值约束。
+- Markdown 报告新增“财报数据摘要”，Executive Summary 新增“财报锚点”。
+- React 工作台中间列新增“最新财报”区块，展示财报类型、财报期、收入、净利润、毛利率、营业利润率、经营现金流、EPS、现金、债务和 SEC 来源链接。
 
 Memory：
 
@@ -154,6 +174,8 @@ Memory：
   - 中间：公司搜索、候选股票、行情 provider、K 线、报告生成。
   - 右侧：报告结果、历史报告记录、PDF 导出。
 - 公司名称输入后自动解析股票代码，并展示候选股票。
+- 单一高置信候选会自动选中，避免 K 线 symbol 为空。
+- K 线区域支持 TradingView Advanced Chart 嵌入，并提供 TradingView 搜索/图表跳转。
 - 已移除 Thread ID 输入和 Analyze Debug 主界面按钮。
 - 技术说明入口放在右上角，并受 `ENABLE_DEBUG_ROUTES` 控制。
 - 前端 API 地址支持 `VITE_API_BASE`。
@@ -169,23 +191,26 @@ Memory：
 - README 已包含本地运行、React 前端、生产环境变量、CORS、debug 开关、SQLite、缓存、限流、异步报告任务说明。
 - `frontend/.env.example` 已提供 `VITE_API_BASE`。
 - `.dockerignore` 排除本地缓存、数据库、前端依赖和构建产物。
+- 前端已部署到 Vercel，并绑定 `https://deepalpha.best`。
+- 后端已部署到 Zeabur，健康检查路径为 `https://deepalpha.zeabur.app/health`；后端代码更新后需要重新部署 Zeabur 才会生效。
 
 ## 4. 未完成内容
 
 投研专业度：
 
-- 缺少 Financial Analyst：尚未结构化接入收入、毛利率、经营利润率、净利润、现金流、分业务数据。
-- 缺少 Valuation Analyst：尚未输出 PE、PS、EV/EBITDA、可比公司估值、Bull/Base/Bear 目标区间。
-- 缺少 Source Quality Agent：尚未对来源进行 A/B/C/D 分级。
-- 缺少 Report Editor Agent：尚未在最终报告前做专门去重、去口语化、清理 Markdown、统一标题层级。
+- Financial Analyst 已接入工作流，但尚未结构化读取 SEC/HKEX/年报/季报中的收入、毛利率、经营利润率、净利润、现金流、分业务数据。
+- Valuation Analyst 已接入工作流，但 PE、PS、EV/EBITDA、可比公司估值、Bull/Base/Bear 目标区间仍依赖更权威的财务和市值数据源。
+- Source Quality Agent 已接入工作流，当前以启发式来源分级为主，仍需要更严格的来源时效、公告优先级和逐条证据评分。
+- Report Editor Agent 已接入工作流，当前可做最终报告整理，但仍可继续强化去重、去口语化、Markdown 清理和标题层级统一。
 - Committee 仍缺少强约束评分模型和估值约束。
 - 报告仍可能出现来源时效混乱，需要数据 freshness 校验。
 
 数据源：
 
-- 财务报表、公告、HKEX/SEC filings、电话会纪要尚未正式接入。
+- SEC companyfacts 已完成 MVP；SEC 原文风险条款、管理层指引、电话会纪要、HKEX/A 股公告尚未正式接入。
 - 新闻正文抓取、网页正文抽取和高质量行业数据库尚未接入。
-- Yahoo/TradingView 行情适合作为公开行情辅助，但不等同于机构级行情源。
+- Yahoo 行情只作为公开行情摘要的补充兜底，线上可能被限流，不应作为核心依赖。
+- TradingView 当前作为前端 K 线展示和外部跳转入口，不作为后端 OHLC 数据源。
 - K 线 provider 目前不含富途、致富证券、同花顺等需授权或非公开接口的 provider。
 
 RAG：
@@ -208,7 +233,7 @@ RAG：
 
 - 历史报告详情仍可继续增强。
 - Watchlist 缺少分组、标签、提醒、最近结论变化。
-- 报告缺少一页式 Executive Summary。
+- 报告已有 Executive Summary 雏形，但仍需强化评级、核心矛盾、关键催化、关键风险和后续跟踪指标的一页式表达。
 - PDF 导出依赖浏览器打印，尚未提供后端服务端 PDF 渲染。
 - 移动端体验尚未系统优化。
 
@@ -232,6 +257,8 @@ RAG：
 │   │   ├── planner.py
 │   │   ├── industry_analyst.py
 │   │   ├── fundamental_analyst.py
+│   │   ├── financial_analyst.py
+│   │   ├── valuation_analyst.py
 │   │   ├── technical_analyst.py
 │   │   ├── news_analyst.py
 │   │   ├── sentiment_analyst.py
@@ -239,6 +266,8 @@ RAG：
 │   │   ├── bear_analyst.py
 │   │   ├── trader.py
 │   │   ├── risk_manager.py
+│   │   ├── source_quality.py
+│   │   ├── report_editor.py
 │   │   ├── committee.py
 │   │   ├── citation_checker.py
 │   │   └── llm_helpers.py
@@ -298,7 +327,7 @@ RAG：
 - `app/report_generator.py`：Markdown 报告生成。
 - `app/agents/llm_helpers.py`：Agent 文本清洗、结构化输出 helpers。
 - `app/tools/symbol_lookup.py`：公司名到股票代码匹配。
-- `app/tools/market_data.py`：Yahoo 行情 provider。
+- `app/tools/market_data.py`：Yahoo/auto 行情摘要 provider；TradingView 由前端嵌入展示。
 - `app/services/market_summary.py`：行情摘要指标计算。
 - `app/memory/store.py`：SQLite 历史记录和 Watchlist。
 - `frontend/src/App.jsx`：React 工作台主界面。
@@ -335,8 +364,8 @@ Memory 使用 SQLite：
 
 行情 provider 保持可替换：
 
-- 当前实现 Yahoo/auto。
-- 前端保留 provider 切换，并支持 TradingView 图表。
+- 后端当前实现 Yahoo/auto，用于尽力构建行情摘要；Yahoo 不稳定时前端仍可展示 TradingView 图表。
+- 前端保留 Auto/TradingView 切换，并提供 TradingView 搜索/图表跳转。
 - TradingView 作为前端图表源，不作为后端数据源。
 - 富途、致富证券、同花顺等需要授权、网关或官方接口后再接入。
 
@@ -344,7 +373,7 @@ Agent 输出逐步结构化：
 
 - 不一次性重写所有 Agent，先保持 `summary/key_points/sources` 兼容。
 - 新增 `claims/risks/watch_items/data_quality`，让报告生成器逐步从“拼文本”转向“拼结构”。
-- 下一步再增加 Report Editor、Financial、Valuation 和 Source Quality。
+- 已补充 Financial、Valuation、Source Quality 和 Report Editor，下一步重点是接入权威财报数据、估值数据和 schema 校验。
 
 客户侧合规优先：
 
@@ -361,22 +390,24 @@ Agent 输出逐步结构化：
 
 ## 7. 下一步开发计划
 
-第一优先级：提升报告专业度
+第一优先级：接入最新财报并提升报告专业度
 
-- 增加 `Report Editor Agent`：去重、清理口语化、清理 Markdown 残留、统一标题层级。
-- 增加一页式 Executive Summary：评级、核心矛盾、关键催化、关键风险、后续跟踪指标。
+- 强化 SEC companyfacts 字段 fallback、周期选择和同比/环比口径。
+- 将财报摘要继续注入 Committee，并形成更强约束评分模型。
+- 新增 SEC 原文 10-K/10-Q 风险条款、管理层讨论和管理层指引摘要。
+- 强化一页式 Executive Summary：评级、核心矛盾、关键催化、关键风险、后续跟踪指标。
 - 将报告生成器进一步改为结构化模板，减少 Agent 原文直出。
 
-第二优先级：补齐投研核心模块
+第二优先级：强化投研核心模块
 
-- 增加 `Financial Analyst`：财务报表、分业务收入、利润率、现金流。
-- 增加 `Valuation Analyst`：估值倍数、可比公司、Bull/Base/Bear 情景。
-- 增加 `Source Quality Agent`：来源分级、时效判断、低质量来源警告。
+- 强化 `Financial Analyst`：接入财务报表、分业务收入、利润率、现金流和趋势判断。
+- 强化 `Valuation Analyst`：接入估值倍数、可比公司、Bull/Base/Bear 情景。
+- 强化 `Source Quality Agent`：来源分级、时效判断、低质量来源警告。
 - Committee Agent 接入财务和估值结果后再输出最终评级。
 
 第三优先级：数据源升级
 
-- 接入公司公告、交易所披露、年报/季报和电话会纪要。
+- 接入公司公告、交易所披露、HKEX 年报/季报和电话会纪要。
 - 接入更强网页正文抽取和新闻正文抓取。
 - 替换 hash embedding 为真实 embedding。
 - RAG 增加 chunk metadata、去重和 rerank。

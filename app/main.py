@@ -25,6 +25,7 @@ from app.schemas import (
     WatchlistRequest,
 )
 from app.services.cache import cache
+from app.services.financials import build_financial_profile
 from app.services.logging import log_event
 from app.services.market_summary import build_market_profile
 from app.services.rate_limit import rate_limit, rate_limiter
@@ -140,6 +141,7 @@ def debug_architecture() -> dict:
             "Memory Store",
             "RAG Retriever",
             "Chroma Vector Store",
+            "SEC EDGAR Companyfacts",
         ],
         "architecture": (
             "Planner -> Industry/Fundamental/Financial/Valuation/News/Technical -> Bull/Bear -> "
@@ -235,6 +237,42 @@ def market_chart(symbol: str, request: Request, range: str = "6mo", interval: st
         }
 
 
+@app.get("/financials/latest")
+def financials_latest(symbol: str, request: Request, exchange: str = "") -> dict:
+    rate_limit(
+        request,
+        "financials_latest",
+        limit=get_int_env("FINANCIALS_RATE_LIMIT", 60),
+        window_seconds=60,
+    )
+    cache_key = f"financials:sec:{symbol.strip().lower()}:{exchange.strip().lower()}"
+    try:
+        data, cache_hit = cache.get_or_set(
+            cache_key,
+            get_int_env("FINANCIALS_CACHE_TTL_SECONDS", 21600),
+            lambda: build_financial_profile(symbol, exchange),
+        )
+        result = {**data, "cache_hit": cache_hit}
+        log_event(
+            "financials_latest",
+            symbol=symbol,
+            source=result.get("source"),
+            enabled=result.get("enabled"),
+            cache_hit=cache_hit,
+        )
+        return result
+    except Exception as exc:
+        log_event("financials_latest_failed", symbol=symbol, error=str(exc))
+        return {
+            "enabled": False,
+            "symbol": symbol,
+            "source": "sec_companyfacts",
+            "reason": str(exc),
+            "summary": [f"SEC financial data unavailable: {exc}"],
+            "cache_hit": False,
+        }
+
+
 def _build_market_profile_from_request(request: AnalyzeRequest) -> dict:
     try:
         return build_market_profile(
@@ -253,9 +291,24 @@ def _build_market_profile_from_request(request: AnalyzeRequest) -> dict:
         }
 
 
+def _build_financial_profile_from_request(request: AnalyzeRequest) -> dict:
+    symbol = request.yahoo_symbol or request.symbol
+    try:
+        return build_financial_profile(symbol, request.exchange)
+    except Exception as exc:
+        return {
+            "enabled": False,
+            "reason": str(exc),
+            "symbol": symbol,
+            "source": "sec_companyfacts",
+            "summary": [f"SEC financial data unavailable: {exc}"],
+        }
+
+
 def _run_analysis(request: AnalyzeRequest) -> dict:
     market_profile = _build_market_profile_from_request(request)
-    return run_deepalpha_graph(request.company_name, request.thread_id, market_profile)
+    financial_profile = _build_financial_profile_from_request(request)
+    return run_deepalpha_graph(request.company_name, request.thread_id, market_profile, financial_profile)
 
 
 def _build_report_response(result: dict) -> dict:

@@ -37,10 +37,16 @@ services:
         value: 86400
       - key: MARKET_CACHE_TTL_SECONDS
         value: 300
+      - key: FINANCIALS_CACHE_TTL_SECONDS
+        value: 21600
       - key: SYMBOL_LOOKUP_RATE_LIMIT
         value: 60
       - key: MARKET_CHART_RATE_LIMIT
         value: 120
+      - key: FINANCIALS_RATE_LIMIT
+        value: 60
+      - key: SEC_USER_AGENT
+        sync: false
       - key: REPORT_USER_DAILY_LIMIT
         value: 3
       - key: REPORT_CREATE_RATE_LIMIT_PER_HOUR
