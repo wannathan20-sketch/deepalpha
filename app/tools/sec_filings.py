@@ -9,12 +9,14 @@ SEC_HEADERS = {
     "User-Agent": os.getenv("SEC_USER_AGENT", "DeepAlpha research prototype contact@example.com"),
     "Accept-Encoding": "gzip, deflate",
 }
-SEC_TIMEOUT_SECONDS = 10
+SEC_TIMEOUT_SECONDS = float(os.getenv("SEC_TIMEOUT_SECONDS", "20"))
 SEC_TICKER_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_COMPANYFACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
 SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
 
 US_EXCHANGES = {"", "NASDAQ", "NYSE", "AMEX", "OTC", "NYSEARCA", "BATS"}
+PERIODIC_REPORT_FORMS = {"10-K", "10-Q", "20-F", "40-F"}
+FOREIGN_ISSUER_UPDATE_FORMS = {"6-K"}
 
 
 def normalize_us_ticker(symbol: str | None, exchange: str | None = None) -> str:
@@ -87,10 +89,7 @@ def get_latest_filing_metadata(cik: str) -> dict:
     filing_dates = recent.get("filingDate", [])
     primary_documents = recent.get("primaryDocument", [])
 
-    for index, form in enumerate(forms):
-        if form not in {"10-K", "10-Q"}:
-            continue
-
+    def filing_at(index: int, form: str) -> dict:
         accession = accessions[index] if index < len(accessions) else ""
         accession_path = accession.replace("-", "")
         primary_doc = primary_documents[index] if index < len(primary_documents) else ""
@@ -105,5 +104,10 @@ def get_latest_filing_metadata(cik: str) -> dict:
             "filing_date": filing_dates[index] if index < len(filing_dates) else "",
             "filing_url": filing_url,
         }
+
+    for accepted_forms in (PERIODIC_REPORT_FORMS, FOREIGN_ISSUER_UPDATE_FORMS):
+        for index, form in enumerate(forms):
+            if form in accepted_forms:
+                return filing_at(index, form)
 
     return {}

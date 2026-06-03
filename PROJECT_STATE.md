@@ -17,7 +17,7 @@ DeepAlpha，中文名“深研 Alpha”，目标是构建一个面向公司研�
 - Agent 层：Planner、Industry、Fundamental、Financial、Valuation、Technical、News、Sentiment、Bull、Bear、Trader、Risk、Source Quality、Report Editor、Committee。
 - RAG 层：Tavily/mock 搜索结果进入 Chroma，本地 hash embedding 支撑最小可运行检索。
 - Market Data 层：公司名称解析、本地股票主表、Yahoo 行情摘要兜底、TradingView 前端图表、6 个月行情摘要、MA20/MA60、趋势和波动率计算。
-- Financial Data 层：美股 SEC EDGAR companyfacts MVP，支持 ticker -> CIK -> 最新 10-K/10-Q metadata -> 核心 XBRL 财务字段提取。
+- Financial Data 层：美股 SEC EDGAR companyfacts MVP，支持 ticker -> CIK -> 最新 10-K/10-Q/20-F metadata -> US GAAP/IFRS 核心 XBRL 财务字段提取。
 - Memory 层：SQLite 保存历史报告和 Watchlist，预留 tenant/user 字段。
 - React/Vite 前端：三栏投研工作台、公司搜索、候选股票、K 线 provider、报告结果、历史记录、PDF 导出。
 - Streamlit 旧前端：`frontend.py` 保留为轻量调试入口。
@@ -84,7 +84,7 @@ Citation Checker
 - `GET /debug/rag`：RAG/Chroma 检索诊断，受 `ENABLE_DEBUG_ROUTES` 控制。
 - `GET /symbol/lookup`：公司名到股票代码自动解析。
 - `GET /market/chart`：Yahoo/auto 行情摘要数据；前端主要使用 TradingView 图表。
-- `GET /financials/latest`：美股 SEC companyfacts 最新财报摘要。
+- `GET /financials/latest`：SEC companyfacts 最新财报摘要，覆盖美股本土公司和部分 ADR/外国发行人。
 - `POST /analyze`：开发调试用完整分析接口。
 - `POST /report`：同步报告接口。
 - `POST /report/tasks`：异步报告任务创建。
@@ -103,7 +103,7 @@ Citation Checker
 - `/config` 运行模式诊断。
 - debug 路由可通过 `ENABLE_DEBUG_ROUTES=false` 关闭。
 - Dockerfile、`.dockerignore`、`.gitignore`。
-- pytest API 测试，目前 `24 passed, 1 warning`。
+- pytest API 测试，目前 `27 passed, 1 warning`。
 
 多 Agent 与 LangGraph：
 
@@ -133,7 +133,7 @@ LLM：
 行情与股票代码：
 
 - `/symbol/lookup` 支持公司名、中文别名、英文名和股票代码自动解析股票代码。
-- 本地 `STOCK_MASTER` 股票主表覆盖常见美股、港股、A 股名称，并已补充美光、MRVL、诺基亚等演示标的。
+- 本地 `STOCK_MASTER` 股票主表覆盖常见美股、港股、A 股名称，并已补充美光、MRVL、诺基亚等演示标的；诺基亚同时提供 `NYSE:NOK` ADR 和 `OMXHEX:NOKIA` 赫尔辛基主上市候选。
 - Yahoo Finance search 仅作为补充扩大自动匹配范围；由于线上可能被限流，核心体验不依赖 Yahoo。
 - `/market/chart` 支持 `auto`、`yahoo` provider。
 - 前端 K 线保留 `Auto` / `TradingView` 切换，并提供 TradingView 外部链接；没有匹配到股票时可跳转 TradingView 搜索。
@@ -144,13 +144,14 @@ SEC 财报数据：
 
 - 新增 `app/tools/sec_filings.py`，支持 SEC company ticker mapping、companyfacts 和 latest submissions metadata。
 - 新增 `app/services/financials.py`，从 companyfacts 中提取 Revenue、Gross Profit、Operating Income、Net Income、EPS、Operating Cash Flow、CapEx、Cash、Debt、Assets、Liabilities、Equity，并计算毛利率、营业利润率、净利率、FCF 和可比期变化。
+- SEC 财报抽取已支持 `10-K`、`10-Q`、`20-F` 和 `40-F`；外资发行人/ADR 可读取 `ifrs-full` taxonomy，并保留财报币种，避免把 ADR 交易币种和报表币种混淆。
 - 新增 `GET /financials/latest`，返回最新 SEC 财报摘要并加入缓存、限流和结构化日志。
 - 报告生成前会构建 `financial_profile` 并注入 LangGraph context。
 - Financial Analyst 和 Valuation Analyst 已优先使用 SEC 财务事实作为财务分析和估值约束。
 - Committee Agent 已接入 SEC `financial_profile`，最终综合判断会把财务事实作为约束条件。
 - SEC companyfacts 字段抽取已增加 latest filing/report date 锚点；资产负债表类 instant metric 只接受贴近最新财报日的字段，避免把多年以前的债务、现金等字段混入最新财报摘要。
 - Markdown 报告新增“财报数据摘要”，Executive Summary 新增“财报锚点”。
-- React 工作台中间列新增“最新财报”区块，展示财报类型、财报期、收入、净利润、毛利率、营业利润率、经营现金流、EPS、现金、债务和 SEC 来源链接。
+- React 工作台中间列新增“最新财报”区块，展示财报类型、财报期、报表币种、收入、净利润、毛利率、营业利润率、经营现金流、EPS、现金、债务和 SEC 来源链接。
 
 Memory：
 
@@ -207,7 +208,7 @@ Memory：
 
 投研专业度：
 
-- Financial Analyst 已接入工作流，但尚未结构化读取 SEC/HKEX/年报/季报中的收入、毛利率、经营利润率、净利润、现金流、分业务数据。
+- Financial Analyst 已接入工作流并读取 SEC 结构化财报摘要；HKEX/A 股公告、分业务数据和管理层指引仍需后续数据源补充。
 - Valuation Analyst 已接入工作流，但 PE、PS、EV/EBITDA、可比公司估值、Bull/Base/Bear 目标区间仍依赖更权威的财务和市值数据源。
 - Source Quality Agent 已接入工作流，当前以启发式来源分级为主，仍需要更严格的来源时效、公告优先级和逐条证据评分。
 - Report Editor Agent 已接入工作流，当前可做最终报告整理，但仍可继续强化去重、去口语化、Markdown 清理和标题层级统一。

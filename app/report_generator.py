@@ -240,6 +240,7 @@ def generate_markdown_report(
             [
                 f"- Symbol：{_sanitize_text(financial_profile.get('symbol', ''))}",
                 f"- Source：{_sanitize_text(financial_profile.get('source', ''))}",
+                f"- Currency：{_sanitize_text(financial_profile.get('currency', ''))}",
                 f"- Filing：{_sanitize_text(financial_profile.get('filing_type', ''))} / {_sanitize_text(financial_profile.get('fiscal_period', ''))}",
                 f"- Report Date：{_sanitize_text(financial_profile.get('report_date', ''))}",
                 f"- Revenue：{_sanitize_text(financial_profile.get('revenue', ''))}",

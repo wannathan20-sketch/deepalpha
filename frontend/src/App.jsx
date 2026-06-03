@@ -52,6 +52,18 @@ const LOCAL_SYMBOL_FALLBACKS = [
     aliases: ["micron", "micron technology", "美光", "美光科技", "mu"],
   },
   {
+    symbol: "NOK",
+    name: "Nokia Oyj ADR",
+    company: "Nokia Oyj ADR",
+    ticker: "NYSE:NOK",
+    raw_symbol: "NOK",
+    exchange: "NYSE",
+    market: "US",
+    confidence: 0.9,
+    source: "frontend_fallback",
+    aliases: ["nokia", "nokia oyj", "诺基亚", "诺基亚公司", "nok", "nokia adr", "nokia us", "诺基亚美股"],
+  },
+  {
     symbol: "NOKIA.HE",
     name: "Nokia Oyj",
     company: "Nokia Oyj",
@@ -61,7 +73,7 @@ const LOCAL_SYMBOL_FALLBACKS = [
     market: "FI",
     confidence: 0.9,
     source: "frontend_fallback",
-    aliases: ["nokia", "nokia oyj", "诺基亚", "诺基亚公司", "nok", "nokia.hel", "nokia.he"],
+    aliases: ["nokia", "nokia oyj", "诺基亚", "诺基亚公司", "nokia.hel", "nokia.he"],
   },
   {
     symbol: "MRVL",
@@ -261,13 +273,14 @@ function CompactMetric({ label, value, tone = "slate" }) {
   );
 }
 
-function formatFinancialValue(value) {
+function formatFinancialValue(value, currency = "") {
   if (value === null || value === undefined || value === "") return "N/A";
   if (typeof value !== "number") return value;
+  const prefix = currency ? `${currency} ` : "";
   const absValue = Math.abs(value);
-  if (absValue >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`;
-  if (absValue >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
-  return value.toLocaleString("en-US");
+  if (absValue >= 1_000_000_000) return `${prefix}${(value / 1_000_000_000).toFixed(2)}B`;
+  if (absValue >= 1_000_000) return `${prefix}${(value / 1_000_000).toFixed(2)}M`;
+  return `${prefix}${value.toLocaleString("en-US")}`;
 }
 
 function safeReportUrl(url) {
@@ -304,6 +317,7 @@ function LatestFinancials({ profile, status }) {
   }
 
   const filingUrl = safeReportUrl(profile.filing_url);
+  const currency = profile.currency || "";
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-slate-800 bg-slate-950/70 p-3">
@@ -311,6 +325,7 @@ function LatestFinancials({ profile, status }) {
           <div className="text-sm font-semibold text-slate-100">{profile.company_name || profile.symbol}</div>
           <div className="mt-1 text-xs text-slate-500">
             {profile.filing_type || "SEC"} · {profile.fiscal_period || profile.report_date || "latest filing"}
+            {currency ? ` · ${currency}` : ""}
           </div>
         </div>
         {filingUrl !== "#" && (
@@ -325,16 +340,16 @@ function LatestFinancials({ profile, status }) {
         )}
       </div>
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <CompactMetric label="收入" value={formatFinancialValue(profile.revenue)} tone="cyan" />
-        <CompactMetric label="净利润" value={formatFinancialValue(profile.net_income)} tone="emerald" />
+        <CompactMetric label="收入" value={formatFinancialValue(profile.revenue, currency)} tone="cyan" />
+        <CompactMetric label="净利润" value={formatFinancialValue(profile.net_income, currency)} tone="emerald" />
         <CompactMetric label="毛利率" value={profile.gross_margin_percent == null ? "N/A" : `${profile.gross_margin_percent}%`} tone="slate" />
-        <CompactMetric label="经营现金流" value={formatFinancialValue(profile.operating_cash_flow)} tone="amber" />
+        <CompactMetric label="经营现金流" value={formatFinancialValue(profile.operating_cash_flow, currency)} tone="amber" />
       </div>
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
         <CompactMetric label="营业利润率" value={profile.operating_margin_percent == null ? "N/A" : `${profile.operating_margin_percent}%`} />
         <CompactMetric label="EPS" value={formatFinancialValue(profile.eps_diluted)} />
-        <CompactMetric label="现金" value={formatFinancialValue(profile.cash)} />
-        <CompactMetric label="债务" value={formatFinancialValue(profile.debt)} />
+        <CompactMetric label="现金" value={formatFinancialValue(profile.cash, currency)} />
+        <CompactMetric label="债务" value={formatFinancialValue(profile.debt, currency)} />
       </div>
     </div>
   );

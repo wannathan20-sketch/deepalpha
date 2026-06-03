@@ -9,20 +9,61 @@ from app.tools.sec_filings import (
 
 
 METRIC_DEFINITIONS = {
-    "revenue": ["RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet"],
-    "gross_profit": ["GrossProfit"],
-    "operating_income": ["OperatingIncomeLoss"],
-    "net_income": ["NetIncomeLoss", "ProfitLoss"],
-    "eps_diluted": ["EarningsPerShareDiluted"],
-    "operating_cash_flow": ["NetCashProvidedByUsedInOperatingActivities"],
-    "capex": ["PaymentsToAcquirePropertyPlantAndEquipment"],
-    "cash": ["CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"],
-    "short_term_debt": ["ShortTermBorrowings", "ShortTermDebt"],
-    "long_term_debt": ["LongTermDebtAndFinanceLeaseObligations", "LongTermDebtNoncurrent"],
-    "total_assets": ["Assets"],
-    "total_liabilities": ["Liabilities"],
-    "shareholders_equity": ["StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"],
+    "revenue": {
+        "us-gaap": ["RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet"],
+        "ifrs-full": ["Revenue", "RevenueFromContractsWithCustomers"],
+    },
+    "gross_profit": {
+        "us-gaap": ["GrossProfit"],
+        "ifrs-full": ["GrossProfit"],
+    },
+    "operating_income": {
+        "us-gaap": ["OperatingIncomeLoss"],
+        "ifrs-full": ["ProfitLossFromOperatingActivities"],
+    },
+    "net_income": {
+        "us-gaap": ["NetIncomeLoss", "ProfitLoss"],
+        "ifrs-full": ["ProfitLoss", "ProfitLossAttributableToOwnersOfParent"],
+    },
+    "eps_diluted": {
+        "us-gaap": ["EarningsPerShareDiluted"],
+        "ifrs-full": ["DilutedEarningsLossPerShare"],
+    },
+    "operating_cash_flow": {
+        "us-gaap": ["NetCashProvidedByUsedInOperatingActivities"],
+        "ifrs-full": ["CashFlowsFromUsedInOperatingActivities"],
+    },
+    "capex": {
+        "us-gaap": ["PaymentsToAcquirePropertyPlantAndEquipment"],
+        "ifrs-full": ["PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities", "PaymentsToAcquirePropertyPlantAndEquipment"],
+    },
+    "cash": {
+        "us-gaap": ["CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"],
+        "ifrs-full": ["CashAndCashEquivalents"],
+    },
+    "short_term_debt": {
+        "us-gaap": ["ShortTermBorrowings", "ShortTermDebt"],
+        "ifrs-full": ["CurrentBorrowingsAndCurrentPortionOfNoncurrentBorrowings", "CurrentBorrowings"],
+    },
+    "long_term_debt": {
+        "us-gaap": ["LongTermDebtAndFinanceLeaseObligations", "LongTermDebtNoncurrent"],
+        "ifrs-full": ["LongtermBorrowings", "NoncurrentBorrowings"],
+    },
+    "total_assets": {
+        "us-gaap": ["Assets"],
+        "ifrs-full": ["Assets"],
+    },
+    "total_liabilities": {
+        "us-gaap": ["Liabilities"],
+        "ifrs-full": ["Liabilities"],
+    },
+    "shareholders_equity": {
+        "us-gaap": ["StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"],
+        "ifrs-full": ["EquityAttributableToOwnersOfParent", "Equity"],
+    },
 }
+ACCEPTED_FACT_FORMS = {"10-K", "10-Q", "20-F", "40-F", "6-K"}
+MONETARY_UNITS = {"USD", "EUR", "GBP", "CNY", "HKD", "JPY", "CAD", "AUD", "CHF", "SEK", "DKK", "NOK"}
 
 INSTANT_METRICS = {
     "cash",
@@ -81,7 +122,7 @@ def _days_between(left: str | None, right: str | None) -> int | None:
 
 
 def _score_fact(fact: dict, prefer_instant: bool, anchor_end: str | None = None) -> tuple:
-    form_rank = {"10-Q": 4, "10-K": 3, "20-F": 2, "8-K": 1}.get(fact.get("form", ""), 0)
+    form_rank = {"10-Q": 5, "10-K": 4, "20-F": 4, "40-F": 4, "6-K": 2, "8-K": 1}.get(fact.get("form", ""), 0)
     frame_rank = 1 if fact.get("frame") else 0
     kind_rank = 1 if (prefer_instant and _is_instant_fact(fact)) or (not prefer_instant and _is_duration_fact(fact)) else 0
     distance = _days_between(fact.get("end"), anchor_end)
@@ -90,30 +131,39 @@ def _score_fact(fact: dict, prefer_instant: bool, anchor_end: str | None = None)
 
 
 def _fact_candidates(companyfacts: dict, metric: str, anchor_end: str | None = None) -> list[dict]:
-    us_gaap = companyfacts.get("facts", {}).get("us-gaap", {})
+    facts_by_taxonomy = companyfacts.get("facts", {})
     candidates: list[dict] = []
 
-    for taxonomy_name in METRIC_DEFINITIONS[metric]:
-        taxonomy_fact = us_gaap.get(taxonomy_name, {})
-        units = taxonomy_fact.get("units", {})
-        for unit, facts in units.items():
-            if metric == "eps_diluted" and unit not in {"USD/shares", "USD/shares"}:
-                continue
-            if metric != "eps_diluted" and unit not in {"USD", "shares"}:
-                continue
-            for fact in facts:
-                if "val" not in fact or fact.get("form") not in {"10-K", "10-Q"}:
+    for taxonomy_namespace, taxonomy_names in METRIC_DEFINITIONS[metric].items():
+        taxonomy = facts_by_taxonomy.get(taxonomy_namespace, {})
+        for taxonomy_name in taxonomy_names:
+            taxonomy_fact = taxonomy.get(taxonomy_name, {})
+            units = taxonomy_fact.get("units", {})
+            for unit, facts in units.items():
+                if metric == "eps_diluted" and not unit.endswith("/shares"):
                     continue
-                candidates.append({**fact, "taxonomy": taxonomy_name, "unit": unit})
+                if metric != "eps_diluted" and unit not in MONETARY_UNITS:
+                    continue
+                for fact in facts:
+                    if "val" not in fact or fact.get("form") not in ACCEPTED_FACT_FORMS:
+                        continue
+                    candidates.append({**fact, "taxonomy": taxonomy_name, "taxonomy_namespace": taxonomy_namespace, "unit": unit})
+
+    if metric == "capex":
+        for fact in candidates:
+            if fact.get("val", 0) < 0:
+                fact["val"] = abs(fact["val"])
 
     prefer_instant = metric in INSTANT_METRICS
     if prefer_instant and anchor_end:
-        anchored_candidates = [
-            fact
-            for fact in candidates
-            if fact.get("end", "") <= anchor_end
-            and (_days_between(fact.get("end"), anchor_end) or 0) <= 120
-        ]
+        anchored_candidates = []
+        for fact in candidates:
+            if fact.get("end", "") > anchor_end:
+                continue
+            distance = _days_between(fact.get("end"), anchor_end)
+            if distance is None or distance > 120:
+                continue
+            anchored_candidates.append(fact)
         candidates = anchored_candidates
 
     return sorted(candidates, key=lambda fact: _score_fact(fact, prefer_instant, anchor_end), reverse=True)
@@ -148,6 +198,7 @@ def _extract_metric(companyfacts: dict, metric: str, anchor_end: str | None = No
         "previous_value": previous_value,
         "change_percent": _change(current_value, previous_value),
         "taxonomy": current.get("taxonomy") if current else "",
+        "taxonomy_namespace": current.get("taxonomy_namespace") if current else "",
         "unit": current.get("unit") if current else "",
         "form": current.get("form") if current else "",
         "fy": current.get("fy") if current else None,
@@ -160,6 +211,14 @@ def _extract_metric(companyfacts: dict, metric: str, anchor_end: str | None = No
 
 def _metric_value(metrics: dict, key: str) -> float | int | None:
     return metrics.get(key, {}).get("value")
+
+
+def _profile_currency(metrics: dict) -> str:
+    for key in ("revenue", "cash", "total_assets"):
+        unit = metrics.get(key, {}).get("unit", "")
+        if unit and not unit.endswith("/shares"):
+            return unit
+    return ""
 
 
 def _build_summary(profile: dict) -> list[str]:
@@ -215,8 +274,17 @@ def build_financial_profile(symbol: str | None, exchange: str | None = None) -> 
 
     cik = cik_match["cik"]
     companyfacts = get_companyfacts(cik)
-    filing_metadata = get_latest_filing_metadata(cik)
     revenue_metric = _extract_metric(companyfacts, "revenue")
+    try:
+        filing_metadata = get_latest_filing_metadata(cik)
+    except Exception as exc:
+        filing_metadata = {
+            "form": revenue_metric.get("form", ""),
+            "report_date": revenue_metric.get("end", ""),
+            "filing_date": revenue_metric.get("filed", ""),
+            "filing_url": "",
+            "metadata_error": str(exc),
+        }
     anchor_end = filing_metadata.get("report_date") or revenue_metric.get("end", "")
     metrics = {
         metric: revenue_metric if metric == "revenue" else _extract_metric(companyfacts, metric, anchor_end)
@@ -243,11 +311,13 @@ def build_financial_profile(symbol: str | None, exchange: str | None = None) -> 
         "cik": cik,
         "company_name": cik_match.get("company_name", ""),
         "source": "sec_companyfacts",
+        "currency": _profile_currency(metrics),
         "fiscal_period": fiscal_period,
         "filing_type": filing_metadata.get("form") or revenue_metric.get("form", ""),
         "filing_url": filing_metadata.get("filing_url", ""),
         "report_date": filing_metadata.get("report_date") or revenue_metric.get("end", ""),
         "filing_date": filing_metadata.get("filing_date") or revenue_metric.get("filed", ""),
+        "metadata_error": filing_metadata.get("metadata_error", ""),
         "revenue": revenue,
         "gross_profit": gross_profit,
         "gross_margin_percent": _pct(gross_profit, revenue),

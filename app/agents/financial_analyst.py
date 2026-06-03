@@ -17,6 +17,7 @@ def _build_financial_profile_text(financial_profile: dict) -> str:
     fields = [
         ("Symbol", financial_profile.get("symbol")),
         ("Source", financial_profile.get("source")),
+        ("Currency", financial_profile.get("currency")),
         ("Filing", f"{financial_profile.get('filing_type', '')} {financial_profile.get('fiscal_period', '')}".strip()),
         ("Report Date", financial_profile.get("report_date")),
         ("Revenue", financial_profile.get("revenue")),

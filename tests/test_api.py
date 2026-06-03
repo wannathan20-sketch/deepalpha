@@ -122,6 +122,27 @@ def test_symbol_lookup_alibaba_returns_hk_and_us() -> None:
     assert data["needs_confirmation"] is True
 
 
+def test_symbol_lookup_nokia_returns_adr_and_primary_listing() -> None:
+    response = client.get("/symbol/lookup", params={"query": "诺基亚"})
+    data = response.json()
+    symbols = [match["symbol"] for match in data["matches"]]
+
+    assert response.status_code == 200
+    assert "NOK" in symbols
+    assert "NOKIA.HE" in symbols
+    assert data["needs_confirmation"] is True
+
+
+def test_symbol_lookup_nok_exact_symbol_prefers_nyse_adr() -> None:
+    response = client.get("/symbol/lookup", params={"query": "NOK"})
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["matches"][0]["symbol"] == "NOK"
+    assert data["matches"][0]["ticker"] == "NYSE:NOK"
+    assert data["matches"][0]["source"] == "exact_symbol"
+
+
 def test_symbol_lookup_exact_symbol() -> None:
     response = client.get("/symbol/lookup", params={"query": "BABA"})
     data = response.json()
@@ -234,6 +255,88 @@ def test_financial_profile_ignores_stale_balance_sheet_facts(monkeypatch) -> Non
     assert profile["cash"] == 16603000000
     assert profile["debt"] is None
     assert profile["metrics"]["long_term_debt"]["value"] is None
+
+
+def test_financial_profile_supports_ifrs_20f_foreign_issuer(monkeypatch) -> None:
+    from app.services.financials import build_financial_profile
+
+    companyfacts = {
+        "facts": {
+            "ifrs-full": {
+                "Revenue": {
+                    "units": {
+                        "EUR": [
+                            {"val": 22400000000, "form": "20-F", "fy": 2024, "fp": "FY", "end": "2024-12-31", "filed": "2025-03-06", "start": "2024-01-01"},
+                            {"val": 19767000000, "form": "20-F", "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-03-05", "start": "2025-01-01"},
+                        ]
+                    }
+                },
+                "GrossProfit": {
+                    "units": {"EUR": [{"val": 8659000000, "form": "20-F", "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-03-05", "start": "2025-01-01"}]}
+                },
+                "ProfitLossFromOperatingActivities": {
+                    "units": {"EUR": [{"val": 1384000000, "form": "20-F", "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-03-05", "start": "2025-01-01"}]}
+                },
+                "ProfitLoss": {
+                    "units": {
+                        "EUR": [
+                            {"val": 660000000, "form": "20-F", "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-03-05", "start": "2025-01-01"}
+                        ]
+                    }
+                },
+                "DilutedEarningsLossPerShare": {
+                    "units": {"EUR/shares": [{"val": 0.12, "form": "20-F", "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-03-05", "start": "2025-01-01"}]}
+                },
+                "CashFlowsFromUsedInOperatingActivities": {
+                    "units": {"EUR": [{"val": 2071000000, "form": "20-F", "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-03-05", "start": "2025-01-01"}]}
+                },
+                "CashAndCashEquivalents": {
+                    "units": {"EUR": [{"val": 5462000000, "form": "20-F", "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-03-05"}]}
+                },
+                "CurrentBorrowingsAndCurrentPortionOfNoncurrentBorrowings": {
+                    "units": {"EUR": [{"val": 1084000000, "form": "20-F", "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-03-05"}]}
+                },
+                "LongtermBorrowings": {
+                    "units": {"EUR": [{"val": 2329000000, "form": "20-F", "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-03-05"}]}
+                },
+                "Assets": {
+                    "units": {"EUR": [{"val": 37597000000, "form": "20-F", "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-03-05"}]}
+                },
+                "Liabilities": {
+                    "units": {"EUR": [{"val": 16539000000, "form": "20-F", "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-03-05"}]}
+                },
+                "EquityAttributableToOwnersOfParent": {
+                    "units": {"EUR": [{"val": 20967000000, "form": "20-F", "fy": 2025, "fp": "FY", "end": "2025-12-31", "filed": "2026-03-05"}]}
+                },
+            }
+        }
+    }
+
+    monkeypatch.setattr(
+        "app.services.financials.ticker_to_cik",
+        lambda ticker: {"matched": True, "ticker": ticker, "cik": "0000924613", "company_name": "NOKIA CORP"},
+    )
+    monkeypatch.setattr("app.services.financials.get_companyfacts", lambda cik: companyfacts)
+    monkeypatch.setattr(
+        "app.services.financials.get_latest_filing_metadata",
+        lambda cik: {"form": "20-F", "report_date": "2025-12-31", "filing_date": "2026-03-05", "filing_url": "https://www.sec.gov/nok.htm"},
+    )
+
+    profile = build_financial_profile("NOK", "NYSE")
+
+    assert profile["enabled"] is True
+    assert profile["symbol"] == "NOK"
+    assert profile["filing_type"] == "20-F"
+    assert profile["currency"] == "EUR"
+    assert profile["fiscal_period"] == "FY2025 FY"
+    assert profile["revenue"] == 19767000000
+    assert profile["gross_margin_percent"] == 43.81
+    assert profile["eps_diluted"] == 0.12
+    assert profile["operating_cash_flow"] == 2071000000
+    assert profile["cash"] == 5462000000
+    assert profile["debt"] == 3413000000
+    assert profile["revenue_change_percent"] == -11.75
+    assert profile["metrics"]["revenue"]["taxonomy_namespace"] == "ifrs-full"
 
 
 def test_analyze() -> None:
