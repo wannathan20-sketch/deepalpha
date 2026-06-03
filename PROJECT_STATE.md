@@ -103,7 +103,7 @@ Citation Checker
 - `/config` 运行模式诊断。
 - debug 路由可通过 `ENABLE_DEBUG_ROUTES=false` 关闭。
 - Dockerfile、`.dockerignore`、`.gitignore`。
-- pytest API 测试，目前 `22 passed, 1 warning`。
+- pytest API 测试，目前 `24 passed, 1 warning`。
 
 多 Agent 与 LangGraph：
 
@@ -147,6 +147,8 @@ SEC 财报数据：
 - 新增 `GET /financials/latest`，返回最新 SEC 财报摘要并加入缓存、限流和结构化日志。
 - 报告生成前会构建 `financial_profile` 并注入 LangGraph context。
 - Financial Analyst 和 Valuation Analyst 已优先使用 SEC 财务事实作为财务分析和估值约束。
+- Committee Agent 已接入 SEC `financial_profile`，最终综合判断会把财务事实作为约束条件。
+- SEC companyfacts 字段抽取已增加 latest filing/report date 锚点；资产负债表类 instant metric 只接受贴近最新财报日的字段，避免把多年以前的债务、现金等字段混入最新财报摘要。
 - Markdown 报告新增“财报数据摘要”，Executive Summary 新增“财报锚点”。
 - React 工作台中间列新增“最新财报”区块，展示财报类型、财报期、收入、净利润、毛利率、营业利润率、经营现金流、EPS、现金、债务和 SEC 来源链接。
 
@@ -162,8 +164,9 @@ Memory：
 
 - Symbol lookup 增加 TTL cache。
 - Market chart 增加 TTL cache。
-- Symbol lookup 和 Market chart 增加基础 rate limit。
-- 报告任务、行情、symbol lookup 输出 JSON 结构化日志。
+- SEC financials 增加 TTL cache。
+- Symbol lookup、Market chart 和 SEC financials 增加基础 rate limit。
+- 报告任务、行情、symbol lookup、SEC financials 输出 JSON 结构化日志。
 
 前端：
 
@@ -192,7 +195,13 @@ Memory：
 - `frontend/.env.example` 已提供 `VITE_API_BASE`。
 - `.dockerignore` 排除本地缓存、数据库、前端依赖和构建产物。
 - 前端已部署到 Vercel，并绑定 `https://deepalpha.best`。
-- 后端已部署到 Zeabur，健康检查路径为 `https://deepalpha.zeabur.app/health`；后端代码更新后需要重新部署 Zeabur 才会生效。
+- 后端已部署到 Zeabur，健康检查路径为 `https://deepalpha.zeabur.app/health`。
+- 2026-06-03 已完成 SEC financials MVP 上线：上线提交为 `3348b103fe1806c5234a1fb037991c80d1be14ab`，前端 Vercel 生产部署已切到新 bundle，后端 Zeabur 已部署新接口。
+- 线上验收已通过：`GET /health` 返回 200，`GET /financials/latest?symbol=TSLA&exchange=NASDAQ` 返回 200，生产前端“最新财报”区块可展示 SEC 财务指标。
+- 前端生产依赖 `npm audit --omit=dev` 为 0 个漏洞。
+- GitHub 上传安全检查已完成：当前仓库为 public；未发现真实 `.env`、数据库、Chroma、`.vercel`、构建产物、真实 DeepSeek/Tavily/OpenAI key 被提交；远端 `origin/main` 与本地 HEAD 一致。
+- 已新增 GitHub Actions CI：push/PR 时分别运行后端 `pytest -q` 和前端 `npm ci && npm run build`。
+- `requirements.txt` 已固定为当前验证过的 Python 依赖版本，降低部署时上游包升级造成的不确定性。
 
 ## 4. 未完成内容
 
@@ -221,11 +230,16 @@ RAG：
 
 工程化：
 
+- GitHub 仓库当前为 public；后续如果加入客户资料、内部 Prompt、真实数据样例或商业敏感逻辑，建议改为 private。
+- Zeabur 生产环境变量曾由 CLI 回显过，虽然未进入 GitHub，但建议轮换 DeepSeek Key、Tavily Key 和 `DEEPALPHA_ACCESS_CODE`。
+- `DEEPALPHA_ACCESS_CODE` 需要使用更强随机字符串，不应使用短数字或弱口令。
+- `requirements.txt` 已 pin 顶层依赖版本，但尚未生成完整传递依赖 lock/constraints 文件。
+- 前端已有 `package-lock.json`，后端仍可进一步补充 `requirements.lock.txt` 或 constraints 文件。
 - 异步报告任务状态仍在进程内内存中，不适合多进程/多实例部署。
 - 尚未接 Redis、队列系统或后台任务框架。
 - 尚未接登录、租户隔离、权限控制。
 - 尚未接生产级监控、告警和错误追踪。
-- 缺少 CI/CD。
+- 已有基础 CI，尚未接入生产部署前强制检查、分支保护和自动回滚。
 - 缺少前端端到端测试。
 - 缺少 LangGraph 节点级测试和 Agent 输出 schema 单元测试。
 
@@ -286,11 +300,13 @@ RAG：
 │   │   ├── __init__.py
 │   │   ├── cache.py
 │   │   ├── citation_checker.py
+│   │   ├── financials.py
 │   │   ├── logging.py
 │   │   ├── market_summary.py
 │   │   └── rate_limit.py
 │   └── tools/
 │       ├── __init__.py
+│       ├── sec_filings.py
 │       ├── search.py
 │       ├── symbol_lookup.py
 │       └── market_data.py
@@ -315,8 +331,10 @@ RAG：
 ├── requirements.txt
 ├── README.md
 ├── .env.example
+├── .env.zeabur.example
 ├── .gitignore
 ├── .dockerignore
+├── render.yaml
 └── PROJECT_STATE.md
 ```
 
@@ -328,7 +346,9 @@ RAG：
 - `app/agents/llm_helpers.py`：Agent 文本清洗、结构化输出 helpers。
 - `app/tools/symbol_lookup.py`：公司名到股票代码匹配。
 - `app/tools/market_data.py`：Yahoo/auto 行情摘要 provider；TradingView 由前端嵌入展示。
+- `app/tools/sec_filings.py`：SEC ticker -> CIK、companyfacts 和 latest filing metadata 工具。
 - `app/services/market_summary.py`：行情摘要指标计算。
+- `app/services/financials.py`：SEC companyfacts 财务字段抽取、指标计算和 `financial_profile` 生成。
 - `app/memory/store.py`：SQLite 历史记录和 Watchlist。
 - `frontend/src/App.jsx`：React 工作台主界面。
 - `frontend/src/styles.css`：Tailwind 入口、报告链接、打印 PDF 样式。
@@ -392,8 +412,8 @@ Agent 输出逐步结构化：
 
 第一优先级：接入最新财报并提升报告专业度
 
-- 强化 SEC companyfacts 字段 fallback、周期选择和同比/环比口径。
-- 将财报摘要继续注入 Committee，并形成更强约束评分模型。
+- 继续强化 SEC companyfacts 字段 fallback、周期选择和同比/环比口径。
+- 在 Committee 中形成更强约束评分模型，而不是仅将财务事实放入提示词。
 - 新增 SEC 原文 10-K/10-Q 风险条款、管理层讨论和管理层指引摘要。
 - 强化一页式 Executive Summary：评级、核心矛盾、关键催化、关键风险、后续跟踪指标。
 - 将报告生成器进一步改为结构化模板，减少 Agent 原文直出。
@@ -415,6 +435,11 @@ Agent 输出逐步结构化：
 
 第四优先级：生产化架构
 
+- 轮换生产 DeepSeek Key、Tavily Key 和 `DEEPALPHA_ACCESS_CODE`，并把访问码改成 24 位以上随机字符串。
+- 为 GitHub `main` 增加分支保护，禁止未验证直接推送到生产分支。
+- 将 GitHub Actions 设为必需检查，并接入生产部署前 gate。
+- 生成完整 Python 传递依赖 lock，例如 `requirements.lock.txt` 或 constraints 文件。
+- 根据项目商业敏感度决定是否将 GitHub 仓库改为 private。
 - 将 `REPORT_TASKS` 从进程内内存迁移到 Redis/Postgres。
 - 增加后台任务队列。
 - 增加认证、用户体系和多租户隔离。

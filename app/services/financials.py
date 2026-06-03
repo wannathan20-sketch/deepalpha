@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from app.tools.sec_filings import (
     get_companyfacts,
     get_latest_filing_metadata,
@@ -61,14 +63,33 @@ def _is_instant_fact(fact: dict) -> bool:
     return not fact.get("start") and bool(fact.get("end"))
 
 
-def _score_fact(fact: dict, prefer_instant: bool) -> tuple:
+def _parse_date(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _days_between(left: str | None, right: str | None) -> int | None:
+    left_date = _parse_date(left)
+    right_date = _parse_date(right)
+    if not left_date or not right_date:
+        return None
+    return abs((left_date - right_date).days)
+
+
+def _score_fact(fact: dict, prefer_instant: bool, anchor_end: str | None = None) -> tuple:
     form_rank = {"10-Q": 4, "10-K": 3, "20-F": 2, "8-K": 1}.get(fact.get("form", ""), 0)
     frame_rank = 1 if fact.get("frame") else 0
     kind_rank = 1 if (prefer_instant and _is_instant_fact(fact)) or (not prefer_instant and _is_duration_fact(fact)) else 0
-    return (fact.get("end", ""), fact.get("filed", ""), form_rank, kind_rank, frame_rank)
+    distance = _days_between(fact.get("end"), anchor_end)
+    proximity_rank = -distance if distance is not None else -999999
+    return (proximity_rank, fact.get("end", ""), fact.get("filed", ""), form_rank, kind_rank, frame_rank)
 
 
-def _fact_candidates(companyfacts: dict, metric: str) -> list[dict]:
+def _fact_candidates(companyfacts: dict, metric: str, anchor_end: str | None = None) -> list[dict]:
     us_gaap = companyfacts.get("facts", {}).get("us-gaap", {})
     candidates: list[dict] = []
 
@@ -86,21 +107,30 @@ def _fact_candidates(companyfacts: dict, metric: str) -> list[dict]:
                 candidates.append({**fact, "taxonomy": taxonomy_name, "unit": unit})
 
     prefer_instant = metric in INSTANT_METRICS
-    return sorted(candidates, key=lambda fact: _score_fact(fact, prefer_instant), reverse=True)
+    if prefer_instant and anchor_end:
+        anchored_candidates = [
+            fact
+            for fact in candidates
+            if fact.get("end", "") <= anchor_end
+            and (_days_between(fact.get("end"), anchor_end) or 0) <= 120
+        ]
+        candidates = anchored_candidates
+
+    return sorted(candidates, key=lambda fact: _score_fact(fact, prefer_instant, anchor_end), reverse=True)
 
 
-def _latest_fact(companyfacts: dict, metric: str) -> dict | None:
-    candidates = _fact_candidates(companyfacts, metric)
+def _latest_fact(companyfacts: dict, metric: str, anchor_end: str | None = None) -> dict | None:
+    candidates = _fact_candidates(companyfacts, metric, anchor_end)
     return candidates[0] if candidates else None
 
 
-def _previous_fact(companyfacts: dict, metric: str, current: dict | None) -> dict | None:
+def _previous_fact(companyfacts: dict, metric: str, current: dict | None, anchor_end: str | None = None) -> dict | None:
     if not current:
         return None
 
     candidates = [
         fact
-        for fact in _fact_candidates(companyfacts, metric)
+        for fact in _fact_candidates(companyfacts, metric, anchor_end=None)
         if fact.get("end", "") < current.get("end", "")
         and (not current.get("fp") or fact.get("fp") == current.get("fp"))
         and (not current.get("form") or fact.get("form") == current.get("form"))
@@ -108,9 +138,9 @@ def _previous_fact(companyfacts: dict, metric: str, current: dict | None) -> dic
     return candidates[0] if candidates else None
 
 
-def _extract_metric(companyfacts: dict, metric: str) -> dict:
-    current = _latest_fact(companyfacts, metric)
-    previous = _previous_fact(companyfacts, metric, current)
+def _extract_metric(companyfacts: dict, metric: str, anchor_end: str | None = None) -> dict:
+    current = _latest_fact(companyfacts, metric, anchor_end)
+    previous = _previous_fact(companyfacts, metric, current, anchor_end)
     current_value = current.get("val") if current else None
     previous_value = previous.get("val") if previous else None
     return {
@@ -124,6 +154,7 @@ def _extract_metric(companyfacts: dict, metric: str) -> dict:
         "fp": current.get("fp") if current else "",
         "end": current.get("end") if current else "",
         "filed": current.get("filed") if current else "",
+        "stale": False,
     }
 
 
@@ -185,7 +216,12 @@ def build_financial_profile(symbol: str | None, exchange: str | None = None) -> 
     cik = cik_match["cik"]
     companyfacts = get_companyfacts(cik)
     filing_metadata = get_latest_filing_metadata(cik)
-    metrics = {metric: _extract_metric(companyfacts, metric) for metric in METRIC_DEFINITIONS}
+    revenue_metric = _extract_metric(companyfacts, "revenue")
+    anchor_end = filing_metadata.get("report_date") or revenue_metric.get("end", "")
+    metrics = {
+        metric: revenue_metric if metric == "revenue" else _extract_metric(companyfacts, metric, anchor_end)
+        for metric in METRIC_DEFINITIONS
+    }
 
     revenue = _metric_value(metrics, "revenue")
     gross_profit = _metric_value(metrics, "gross_profit")
@@ -197,7 +233,6 @@ def build_financial_profile(symbol: str | None, exchange: str | None = None) -> 
     long_term_debt = _metric_value(metrics, "long_term_debt") or 0
     debt = short_term_debt + long_term_debt if short_term_debt or long_term_debt else None
 
-    revenue_metric = metrics["revenue"]
     fiscal_period = ""
     if revenue_metric.get("fy") and revenue_metric.get("fp"):
         fiscal_period = f"FY{revenue_metric['fy']} {revenue_metric['fp']}"

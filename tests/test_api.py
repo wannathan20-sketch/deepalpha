@@ -184,6 +184,58 @@ def test_financials_latest(monkeypatch) -> None:
     assert data["cache_hit"] is False
 
 
+def test_financial_profile_ignores_stale_balance_sheet_facts(monkeypatch) -> None:
+    from app.services.financials import build_financial_profile
+
+    companyfacts = {
+        "facts": {
+            "us-gaap": {
+                "RevenueFromContractWithCustomerExcludingAssessedTax": {
+                    "units": {
+                        "USD": [
+                            {"val": 19335000000, "form": "10-Q", "fy": 2025, "fp": "Q1", "end": "2025-03-31", "filed": "2025-04-23", "start": "2025-01-01"},
+                            {"val": 22387000000, "form": "10-Q", "fy": 2026, "fp": "Q1", "end": "2026-03-31", "filed": "2026-04-23", "start": "2026-01-01"},
+                        ]
+                    }
+                },
+                "CashAndCashEquivalentsAtCarryingValue": {
+                    "units": {
+                        "USD": [
+                            {"val": 16603000000, "form": "10-Q", "fy": 2026, "fp": "Q1", "end": "2026-03-31", "filed": "2026-04-23"}
+                        ]
+                    }
+                },
+                "LongTermDebtNoncurrent": {
+                    "units": {
+                        "USD": [
+                            {"val": 597600000, "form": "10-Q", "fy": 2014, "fp": "Q3", "end": "2014-09-30", "filed": "2014-11-07"}
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+    monkeypatch.setattr(
+        "app.services.financials.ticker_to_cik",
+        lambda ticker: {"matched": True, "ticker": ticker, "cik": "0001318605", "company_name": "Tesla, Inc."},
+    )
+    monkeypatch.setattr("app.services.financials.get_companyfacts", lambda cik: companyfacts)
+    monkeypatch.setattr(
+        "app.services.financials.get_latest_filing_metadata",
+        lambda cik: {"form": "10-Q", "report_date": "2026-03-31", "filing_date": "2026-04-23", "filing_url": "https://www.sec.gov/test.htm"},
+    )
+
+    profile = build_financial_profile("TSLA", "NASDAQ")
+
+    assert profile["enabled"] is True
+    assert profile["revenue"] == 22387000000
+    assert profile["revenue_change_percent"] == 15.78
+    assert profile["cash"] == 16603000000
+    assert profile["debt"] is None
+    assert profile["metrics"]["long_term_debt"]["value"] is None
+
+
 def test_analyze() -> None:
     response = client.post("/analyze", json={"company_name": "OpenAI"})
     data = response.json()
@@ -230,6 +282,7 @@ def test_analyze() -> None:
     assert "来源评级" in data["markdown_report"]
     assert "risks" in data["final_report"]
     assert "watch_items" in data["final_report"]
+    assert "financial_profile" in data["final_report"]
     assert "edits" in data["report_editor"]
     assert "report_editor_completed" in [step["step_name"] for step in data["trace"]["steps"]]
 

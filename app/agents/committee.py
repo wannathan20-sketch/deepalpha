@@ -44,6 +44,34 @@ def _build_context_text(agent_outputs: dict) -> str:
     return "\n".join(lines)
 
 
+def _build_financial_profile_text(financial_profile: dict) -> str:
+    if not financial_profile.get("enabled"):
+        return f"SEC 财报摘要不可用：{financial_profile.get('reason', '未提供结构化财报数据。')}"
+
+    fields = [
+        ("Source", financial_profile.get("source")),
+        ("Filing", f"{financial_profile.get('filing_type', '')} {financial_profile.get('fiscal_period', '')}".strip()),
+        ("Report Date", financial_profile.get("report_date")),
+        ("Revenue", financial_profile.get("revenue")),
+        ("Revenue Change %", financial_profile.get("revenue_change_percent")),
+        ("Gross Margin %", financial_profile.get("gross_margin_percent")),
+        ("Operating Margin %", financial_profile.get("operating_margin_percent")),
+        ("Net Income", financial_profile.get("net_income")),
+        ("Net Income Change %", financial_profile.get("net_income_change_percent")),
+        ("EPS Diluted", financial_profile.get("eps_diluted")),
+        ("Operating Cash Flow", financial_profile.get("operating_cash_flow")),
+        ("Operating Cash Flow Change %", financial_profile.get("operating_cash_flow_change_percent")),
+        ("Free Cash Flow", financial_profile.get("free_cash_flow")),
+        ("Cash", financial_profile.get("cash")),
+        ("Debt", financial_profile.get("debt")),
+        ("Total Assets", financial_profile.get("total_assets")),
+        ("Total Liabilities", financial_profile.get("total_liabilities")),
+        ("Shareholders Equity", financial_profile.get("shareholders_equity")),
+        ("Filing URL", financial_profile.get("filing_url")),
+    ]
+    return "\n".join(f"{label}: {value}" for label, value in fields if value not in {None, ""})
+
+
 def _clean_text(text: str, company_name: str, sources_count: int) -> str:
     return (
         _fallback_summary(company_name, sources_count)
@@ -71,11 +99,13 @@ def _is_unavailable_llm_text(text: str) -> bool:
 
 def analyze(company_name: str, context: dict) -> dict:
     agent_outputs = context.get("agent_outputs", {})
+    financial_profile = context.get("financial_profile", {})
     sources_count = sum(
         len(result.get("sources", [])) for result in agent_outputs.values()
     )
 
     context_text = _build_context_text(agent_outputs)
+    financial_profile_text = _build_financial_profile_text(financial_profile)
     memory_text = build_memory_text(context.get("memory", {}))
     recommendation = "watchlist"
 
@@ -94,9 +124,11 @@ def analyze(company_name: str, context: dict) -> dict:
                 "8. 财务与估值约束\n"
                 "9. 来源可信度与低质量来源警告\n"
                 "10. 不足与待验证数据\n\n"
+                "SEC 结构化财报事实是财务和估值约束的优先锚点，最终结论不得与这些财务事实冲突。\n"
                 "请使用清晰、专业、克制的中文。不要提及 mock、占位或测试。"
                 "不要使用“好的”“作为某某 Agent”等对话式开头。不要重复上游 Agent 原文。不要输出 Markdown 装饰符号。\n\n"
                 f"{memory_text}\n\n"
+                f"SEC 结构化财报事实：\n{financial_profile_text}\n\n"
                 f"{context_text}"
             ),
             system_prompt="你是深研 Alpha 的 Committee Agent，负责综合投研判断。",
@@ -135,4 +167,5 @@ def analyze(company_name: str, context: dict) -> dict:
         "confidence": 0.79,
         "recommendation": recommendation,
         "sources_count": sources_count,
+        "financial_profile": financial_profile,
     }
