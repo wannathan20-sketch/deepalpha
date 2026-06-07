@@ -104,6 +104,8 @@ const YAHOO_SUFFIX_BY_EXCHANGE = {
   XETR: "DE",
 };
 
+// Convert exchange-qualified tickers into Yahoo Finance symbols used by the backend market endpoint.
+// 将带交易所前缀的 ticker 转换为后端行情接口使用的 Yahoo Finance 符号。
 function toYahooSymbol(ticker, matchedSymbol) {
   if (matchedSymbol?.symbol) return matchedSymbol.symbol;
   if (matchedSymbol?.raw_symbol) return matchedSymbol.raw_symbol;
@@ -124,6 +126,8 @@ function exchangeFromTicker(ticker) {
   return ticker.includes(":") ? ticker.split(":", 1)[0] : "";
 }
 
+// Recommended picks bypass remote lookup, so build the same selection shape as search results.
+// 推荐标的跳过远程搜索，因此这里构造与搜索结果一致的选中对象结构。
 function buildRecommendedSelection(company, ticker) {
   const yahooSymbol = toYahooSymbol(ticker);
   return {
@@ -139,6 +143,8 @@ function buildRecommendedSelection(company, ticker) {
   };
 }
 
+// A small local fallback keeps common ambiguous names usable if the symbol API is unavailable.
+// 少量本地兜底数据用于符号接口不可用时处理常见且容易歧义的公司名称。
 function findLocalFallbackMatches(query) {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) return [];
@@ -171,6 +177,8 @@ function shouldAutoSelectSymbol(matches, data = {}) {
 }
 
 function getOrCreateUserId() {
+  // Persist an anonymous id so backend limits are per user session instead of only per IP.
+  // 持久化匿名用户标识，让后端限流能按用户会话区分，而不只依赖 IP。
   const existing = window.localStorage.getItem(USER_ID_STORAGE_KEY);
   if (existing) return existing;
 

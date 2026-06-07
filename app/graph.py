@@ -30,6 +30,9 @@ from app.utils import safe_run_agent
 
 
 class DeepAlphaState(TypedDict):
+    """Shared LangGraph state passed between research nodes.
+    LangGraph 各节点之间传递的共享状态，集中保存输入画像、Agent 输出、报告与追踪信息。
+    """
     thread_id: str
     company_name: str
     market_profile: dict
@@ -52,10 +55,15 @@ def _run_agent_node(
     agent_name: str,
     func,
 ) -> DeepAlphaState:
+    """Run a single analyst and merge its structured result back into state.
+    执行单个分析 Agent，并把结构化结果合并回全局状态。
+    """
     context = state["context"]
     team_results = dict(state["team_results"])
     trace = state["trace"]
 
+    # Downstream agents see previous outputs, which lets bull/bear/risk roles debate accumulated evidence.
+    # 下游 Agent 可以读取前序结果，从而基于已积累证据继续辩论与审查。
     context["agent_outputs"] = team_results
     result = safe_run_agent(agent_name, func, state["company_name"], context)
     team_results[output_key] = result
@@ -78,6 +86,9 @@ def _run_agent_node(
 
 
 def planner_node(state: DeepAlphaState) -> DeepAlphaState:
+    """Create the research plan and seed context with recent memory.
+    生成研究计划，并把近期历史投研记忆注入上下文。
+    """
     research_plan = planner.create_plan(state["company_name"])
     recent_history = [
         {
@@ -140,6 +151,9 @@ def industry_node(state: DeepAlphaState) -> DeepAlphaState:
 
 
 def rag_node(state: DeepAlphaState) -> DeepAlphaState:
+    """Retrieve industry context before specialist analysts run.
+    在专业分析 Agent 执行前检索行业上下文，补足市场规模、竞争和监管背景。
+    """
     query = f"{state['company_name']} industry market size competitors regulation"
     rag_context = retrieve_industry_context(state["company_name"], query)
     rag_chunks = rag_context.get("chunks", [])
@@ -211,6 +225,9 @@ def source_quality_node(state: DeepAlphaState) -> DeepAlphaState:
 
 
 def committee_node(state: DeepAlphaState) -> DeepAlphaState:
+    """Synthesize analyst outputs into one investment committee decision.
+    将各分析 Agent 的结果汇总为投研委员会的综合判断。
+    """
     result = safe_run_agent(
         "committee",
         committee.analyze,
@@ -230,6 +247,9 @@ def committee_node(state: DeepAlphaState) -> DeepAlphaState:
 
 
 def report_node(state: DeepAlphaState) -> DeepAlphaState:
+    """Render structured state into a user-facing markdown report.
+    将结构化状态渲染为面向用户的 Markdown 投研报告。
+    """
     markdown_report = generate_markdown_report(
         state["company_name"],
         state["research_plan"],
@@ -246,6 +266,9 @@ def report_node(state: DeepAlphaState) -> DeepAlphaState:
 
 
 def report_editor_node(state: DeepAlphaState) -> DeepAlphaState:
+    """Clean and polish the generated report without changing graph evidence.
+    清理并润色生成的报告文本，但不改变图中已形成的证据结构。
+    """
     result = safe_run_agent(
         "report_editor",
         report_editor.edit_report,
@@ -279,6 +302,9 @@ def report_editor_node(state: DeepAlphaState) -> DeepAlphaState:
 
 
 def citation_node(state: DeepAlphaState) -> DeepAlphaState:
+    """Validate claim/source coverage as the last graph step.
+    作为最后一步检查论点与来源覆盖情况，并结束 trace。
+    """
     citation_check = check_citations(
         state["team_results"],
         state["rag_chunks"],
@@ -290,6 +316,9 @@ def citation_node(state: DeepAlphaState) -> DeepAlphaState:
 
 
 def _build_graph():
+    """Compile the deterministic research workflow.
+    编译固定顺序的投研工作流，保证每次报告都经过同一套审查链路。
+    """
     graph = StateGraph(DeepAlphaState)
 
     graph.add_node("planner", planner_node)
@@ -344,6 +373,9 @@ def run_deepalpha_graph(
     market_profile: dict | None = None,
     financial_profile: dict | None = None,
 ) -> dict:
+    """Public graph runner used by API endpoints.
+    API 入口调用的图执行函数，负责初始化状态、运行工作流并整理响应。
+    """
     if thread_id is None:
         thread_id = str(uuid4())
 

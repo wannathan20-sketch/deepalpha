@@ -7,6 +7,9 @@ load_dotenv()
 
 
 def _mock_generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800) -> str:
+    """Return a safe fallback when no real model is configured.
+    当未配置真实模型或外部调用失败时，返回安全的兜底文本。
+    """
     return (
         "Mock LLM response. "
         "Set LLM_PROVIDER=openai or LLM_PROVIDER=deepseek with an API key to enable real generation."
@@ -21,6 +24,9 @@ def _generate_with_openai_compatible(
     system_prompt: str = "",
     max_tokens: int = 800,
 ) -> str:
+    """Call providers that expose an OpenAI-compatible chat completions API.
+    调用兼容 OpenAI Chat Completions 协议的模型服务。
+    """
     from openai import OpenAI
 
     client_kwargs = {"api_key": api_key}
@@ -46,6 +52,9 @@ def _generate_with_openai_compatible(
 
 
 def generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800) -> str:
+    """Route generation to the configured provider and degrade gracefully.
+    根据环境变量选择模型供应商，并在异常时平滑降级到 mock 输出。
+    """
     llm_provider = os.getenv("LLM_PROVIDER", "mock").lower()
     openai_api_key = os.getenv("OPENAI_API_KEY")
     deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")

@@ -4,6 +4,9 @@ import requests
 
 
 def get_yahoo_chart(symbol: str, range_: str = "6mo", interval: str = "1d") -> dict:
+    """Fetch raw chart candles from Yahoo Finance and normalize them for the app.
+    从 Yahoo Finance 获取 K 线数据，并标准化为应用内部使用的行情点。
+    """
     normalized_symbol = symbol.strip()
     if not normalized_symbol:
         return {"symbol": symbol, "points": []}
@@ -53,6 +56,9 @@ def get_yahoo_chart(symbol: str, range_: str = "6mo", interval: str = "1d") -> d
 
 
 def get_market_chart(symbol: str, provider: str = "auto", range_: str = "6mo", interval: str = "1d") -> dict:
+    """Resolve the best available market data provider.
+    按 provider 参数选择可用行情源；auto 模式优先尝试 Yahoo，失败则返回空结果。
+    """
     normalized_provider = provider.strip().lower() or "auto"
 
     if normalized_provider == "yahoo":

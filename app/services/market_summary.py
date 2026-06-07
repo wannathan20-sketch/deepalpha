@@ -10,6 +10,9 @@ def build_market_profile(
     exchange: str | None = None,
     provider: str | None = None,
 ) -> dict:
+    """Summarize six-month price action into features useful for analysts.
+    将 6 个月行情压缩为分析 Agent 可使用的趋势、收益率、波动率和均线特征。
+    """
     provider_name = provider or "auto"
     resolved_symbol = (yahoo_symbol or symbol or "").strip()
     if ":" in resolved_symbol:
@@ -32,6 +35,8 @@ def build_market_profile(
             "exchange": exchange or chart.get("exchange", ""),
         }
 
+    # Work from closes only so partially missing OHLCV rows do not break the trend summary.
+    # 只使用收盘价计算核心摘要，避免部分 OHLCV 字段缺失导致趋势计算失败。
     closes = [point["close"] for point in points if point.get("close") is not None]
     latest = closes[-1]
     first = closes[0]

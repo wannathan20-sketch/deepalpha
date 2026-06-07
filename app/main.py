@@ -43,6 +43,8 @@ app.add_middleware(
 )
 
 
+# In-memory task state is intentionally lightweight for the MVP; use Redis/DB for multi-worker deployments.
+# 当前异步任务状态仅保存在进程内，适合 MVP；多进程或生产部署应迁移到 Redis/数据库。
 REPORT_TASKS: dict[str, dict] = {}
 REPORT_TASKS_LOCK = Lock()
 
@@ -53,6 +55,9 @@ def _check_limit(key: str, *, limit: int, window_seconds: int) -> None:
 
 
 def _require_report_access(request: Request) -> str:
+    """Validate optional access code and return a stable per-user limit key.
+    校验可选访问码，并返回用于用户级限流的稳定标识。
+    """
     expected_access_code = get_access_code()
     provided_access_code = request.headers.get("x-deepalpha-access-code", "")
     user_id = request.headers.get("x-deepalpha-user-id", "").strip() or "anonymous"
@@ -64,6 +69,9 @@ def _require_report_access(request: Request) -> str:
 
 
 def _enforce_report_generation_limits(request: Request) -> None:
+    """Apply layered limits before expensive multi-agent analysis starts.
+    在启动高成本多 Agent 分析前，同时应用用户、IP 与全局限流。
+    """
     user_id = _require_report_access(request)
     client_host = request.client.host if request.client else "unknown"
     _check_limit(
@@ -177,6 +185,8 @@ def symbol_lookup(query: str, request: Request) -> dict:
         limit=get_int_env("SYMBOL_LOOKUP_RATE_LIMIT", 60),
         window_seconds=60,
     )
+    # Symbol search is called while users type; cache normalized queries to keep the UI responsive.
+    # 符号搜索会在用户输入时频繁触发，按标准化查询缓存以提升响应速度。
     cache_key = f"symbol:{query.strip().lower()}"
     try:
         data, cache_hit = cache.get_or_set(
@@ -208,6 +218,8 @@ def market_chart(symbol: str, request: Request, range: str = "6mo", interval: st
         limit=get_int_env("MARKET_CHART_RATE_LIMIT", 120),
         window_seconds=60,
     )
+    # Market data has a short TTL so dashboards feel fresh without hammering the provider.
+    # 行情数据使用较短 TTL，在保持新鲜度的同时避免过度请求外部数据源。
     cache_key = f"market:{provider.lower()}:{symbol.strip().lower()}:{range}:{interval}"
     try:
         data, cache_hit = cache.get_or_set(
@@ -306,12 +318,18 @@ def _build_financial_profile_from_request(request: AnalyzeRequest) -> dict:
 
 
 def _run_analysis(request: AnalyzeRequest) -> dict:
+    """Assemble external data profiles, then hand off to the research graph.
+    先构建外部行情/财报画像，再交给投研图执行完整分析。
+    """
     market_profile = _build_market_profile_from_request(request)
     financial_profile = _build_financial_profile_from_request(request)
     return run_deepalpha_graph(request.company_name, request.thread_id, market_profile, financial_profile)
 
 
 def _build_report_response(result: dict) -> dict:
+    """Trim the full graph output into the report endpoint contract.
+    将完整图执行结果裁剪为报告接口所需的响应结构。
+    """
     trace = result["trace"]
     return {
         "thread_id": result["thread_id"],
@@ -331,6 +349,9 @@ def _build_report_response(result: dict) -> dict:
 
 
 def _run_report_task(task_id: str, request: AnalyzeRequest) -> None:
+    """Background entrypoint for long-running report generation.
+    长耗时报告生成的后台任务入口，负责状态流转和历史记录落库。
+    """
     log_event("report_task_started", task_id=task_id, company_name=request.company_name)
     with REPORT_TASKS_LOCK:
         REPORT_TASKS[task_id]["status"] = "running"

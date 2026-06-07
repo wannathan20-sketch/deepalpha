@@ -7,6 +7,9 @@ load_dotenv()
 
 
 def _env_bool(name: str, default: bool) -> bool:
+    """Parse feature flags from env vars.
+    解析环境变量中的布尔开关，用于控制调试路由、能力开关等运行时行为。
+    """
     value = os.getenv(name)
     if value is None:
         return default
@@ -36,6 +39,9 @@ def get_access_code() -> str:
 
 
 def get_runtime_config() -> dict:
+    """Return non-secret runtime capabilities for API/frontend display.
+    返回不含密钥的运行时能力信息，供 API 与前端判断当前可用功能。
+    """
     llm_provider = os.getenv("LLM_PROVIDER", "mock").lower()
     openai_api_key = os.getenv("OPENAI_API_KEY", "")
     openai_model = os.getenv("OPENAI_MODEL", "gpt-5")

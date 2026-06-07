@@ -17,6 +17,9 @@ class RuntimeConfigResponse(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
+    """Client request for a full research run.
+    客户端发起完整投研分析时提交的请求体。
+    """
     company_name: str
     thread_id: str | None = None
     symbol: str | None = None
@@ -33,6 +36,9 @@ class WatchlistRequest(BaseModel):
 
 
 class AnalyzeResponse(BaseModel):
+    """Full graph response used by the interactive analysis endpoint.
+    交互式分析接口返回的完整图执行结果。
+    """
     thread_id: str
     company_name: str
     status: str
@@ -52,6 +58,9 @@ class AnalyzeResponse(BaseModel):
 
 
 class ReportResponse(BaseModel):
+    """Compact report response for report-focused clients.
+    面向报告页面/下载场景的精简响应结构。
+    """
     thread_id: str
     company_name: str
     status: str
@@ -69,6 +78,9 @@ class ReportTaskCreateResponse(BaseModel):
 
 
 class ReportTaskStatusResponse(BaseModel):
+    """Polling response for background report tasks.
+    后台报告任务轮询接口返回的任务状态。
+    """
     task_id: str
     status: str
     result: dict[str, Any] | None = None

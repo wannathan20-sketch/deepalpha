@@ -65,6 +65,8 @@ METRIC_DEFINITIONS = {
 ACCEPTED_FACT_FORMS = {"10-K", "10-Q", "20-F", "40-F", "6-K"}
 MONETARY_UNITS = {"USD", "EUR", "GBP", "CNY", "HKD", "JPY", "CAD", "AUD", "CHF", "SEK", "DKK", "NOK"}
 
+# Balance-sheet metrics are point-in-time facts; income/cash-flow metrics are period-duration facts.
+# 资产负债表指标是时点数据，利润表/现金流指标是期间数据，筛选逻辑需要区分两类事实。
 INSTANT_METRICS = {
     "cash",
     "short_term_debt",
@@ -122,6 +124,9 @@ def _days_between(left: str | None, right: str | None) -> int | None:
 
 
 def _score_fact(fact: dict, prefer_instant: bool, anchor_end: str | None = None) -> tuple:
+    """Rank SEC facts by recency, filing quality, period type, and filing date.
+    按时效、报表类型、事实类型与披露日期对 SEC fact 候选项排序。
+    """
     form_rank = {"10-Q": 5, "10-K": 4, "20-F": 4, "40-F": 4, "6-K": 2, "8-K": 1}.get(fact.get("form", ""), 0)
     frame_rank = 1 if fact.get("frame") else 0
     kind_rank = 1 if (prefer_instant and _is_instant_fact(fact)) or (not prefer_instant and _is_duration_fact(fact)) else 0
@@ -131,6 +136,9 @@ def _score_fact(fact: dict, prefer_instant: bool, anchor_end: str | None = None)
 
 
 def _fact_candidates(companyfacts: dict, metric: str, anchor_end: str | None = None) -> list[dict]:
+    """Collect normalized metric candidates across US GAAP and IFRS taxonomies.
+    跨 US GAAP 与 IFRS 分类收集同一指标的候选 fact，并统一为内部结构。
+    """
     facts_by_taxonomy = companyfacts.get("facts", {})
     candidates: list[dict] = []
 
@@ -149,6 +157,8 @@ def _fact_candidates(companyfacts: dict, metric: str, anchor_end: str | None = N
                         continue
                     candidates.append({**fact, "taxonomy": taxonomy_name, "taxonomy_namespace": taxonomy_namespace, "unit": unit})
 
+    # SEC datasets may store capex as an outflow; normalize it to a positive spend value.
+    # SEC 数据中资本开支可能以现金流出负数呈现，这里统一转换为正的支出金额。
     if metric == "capex":
         for fact in candidates:
             if fact.get("val", 0) < 0:
@@ -156,6 +166,8 @@ def _fact_candidates(companyfacts: dict, metric: str, anchor_end: str | None = N
 
     prefer_instant = metric in INSTANT_METRICS
     if prefer_instant and anchor_end:
+        # Keep balance-sheet facts near the income-statement anchor so ratios compare the same reporting period.
+        # 资产负债表指标需贴近利润表锚点，避免把不同报告期的数据混在一起计算。
         anchored_candidates = []
         for fact in candidates:
             if fact.get("end", "") > anchor_end:
@@ -252,6 +264,9 @@ def _build_summary(profile: dict) -> list[str]:
 
 
 def build_financial_profile(symbol: str | None, exchange: str | None = None) -> dict:
+    """Build a compact financial profile from SEC Companyfacts.
+    基于 SEC Companyfacts 构建前端和 Agent 可直接使用的财务画像。
+    """
     ticker = normalize_us_ticker(symbol, exchange)
     if not ticker:
         return {
@@ -285,6 +300,8 @@ def build_financial_profile(symbol: str | None, exchange: str | None = None) -> 
             "filing_url": "",
             "metadata_error": str(exc),
         }
+    # Revenue usually gives the best period anchor; other metrics are selected around the same report date.
+    # 收入通常是最稳定的期间锚点，其他指标围绕同一报告日期选取以保持口径一致。
     anchor_end = filing_metadata.get("report_date") or revenue_metric.get("end", "")
     metrics = {
         metric: revenue_metric if metric == "revenue" else _extract_metric(companyfacts, metric, anchor_end)

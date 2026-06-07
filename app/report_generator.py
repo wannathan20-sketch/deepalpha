@@ -6,6 +6,9 @@ BLOCKED_TERMS = ("mock", "placeholder", "assumed", "modeled")
 
 
 def _sanitize_text(value: object) -> str:
+    """Remove model artifacts before report rendering.
+    渲染报告前清理模型输出中的 Markdown 噪音和占位词。
+    """
     text = clean_markdown_artifacts(str(value))
     lowered = text.lower()
     return PLACEHOLDER_ANALYSIS if any(term in lowered for term in BLOCKED_TERMS) else text
@@ -36,6 +39,9 @@ def _render_executive_summary(
     market_profile: dict,
     financial_profile: dict,
 ) -> list[str]:
+    """Place the decision, market facts, financial facts, and risk boundary first.
+    将结论、行情事实、财报事实和风险边界放在报告开头，方便快速阅读。
+    """
     bull_points = team_results.get("bull", {}).get("key_points", [])
     bear_points = team_results.get("bear", {}).get("key_points", [])
     risk_points = final_report.get("risks", []) or team_results.get("risk", {}).get("risks", [])
@@ -101,6 +107,9 @@ def _render_source_ratings(result: dict) -> list[str]:
 
 
 def _render_agent_section(title: str, result: dict) -> list[str]:
+    """Render one agent output with claims, evidence, risks, and source quality.
+    渲染单个 Agent 的结论、证据、风险、跟踪项和来源质量。
+    """
     lines = [title, ""]
     lines.append("分析摘要：")
     lines.append(_sanitize_text(result.get("summary", "暂无 summary。")))
@@ -156,6 +165,9 @@ def _render_agent_section(title: str, result: dict) -> list[str]:
 
 
 def _collect_sources(team_results: dict) -> list[dict]:
+    """Deduplicate sources across agents for the final bibliography.
+    汇总并去重各 Agent 的来源，生成报告末尾的信息来源列表。
+    """
     sources = []
     seen_urls = set()
 
@@ -180,6 +192,9 @@ def generate_markdown_report(
     market_profile: dict | None = None,
     financial_profile: dict | None = None,
 ) -> str:
+    """Render the complete investment research report in stable section order.
+    按固定章节顺序渲染完整投研报告，便于前端展示和后续审阅。
+    """
     lines = [
         f"# 深研 Alpha 投研报告：{company_name}",
         "",
