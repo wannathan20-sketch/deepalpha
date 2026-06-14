@@ -21,13 +21,22 @@ def retrieve_industry_context(company_name: str, query: str) -> dict:
                 "title": chunk.get("title", ""),
                 "url": chunk.get("url", ""),
                 "snippet": chunk.get("content", ""),
+                "chunk_id": chunk.get("chunk_id") or chunk.get("id", ""),
+                "source_domain": chunk.get("source_domain", ""),
+                "source_type": chunk.get("source_type", ""),
+                "source_grade": chunk.get("source_grade", ""),
+                "retrieval_score": chunk.get("retrieval_score"),
+                "published_at": chunk.get("published_at", ""),
+                "retrieved_at": chunk.get("retrieved_at", ""),
             }
         )
 
     return {
         "query": query,
         "vector_store": vector_store.provider,
+        "embedding_provider": vector_store.embedding_provider.name,
         "collection_name": vector_store.collection_name,
+        "documents_count": len(documents),
         "chunks": chunks,
         "sources": sources,
     }

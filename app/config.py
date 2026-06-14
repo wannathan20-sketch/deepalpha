@@ -48,6 +48,7 @@ def get_runtime_config() -> dict:
     deepseek_api_key = os.getenv("DEEPSEEK_API_KEY", "")
     search_provider = os.getenv("SEARCH_PROVIDER", "mock").lower()
     tavily_api_key = os.getenv("TAVILY_API_KEY", "")
+    rag_embedding_provider = os.getenv("RAG_EMBEDDING_PROVIDER", "hash").lower()
     llm_model = "deepseek-chat" if llm_provider == "deepseek" else openai_model
     llm_enabled = (
         (llm_provider == "openai" and bool(openai_api_key))
@@ -60,6 +61,10 @@ def get_runtime_config() -> dict:
         "llm_enabled": llm_enabled,
         "search_provider": search_provider,
         "search_enabled": search_provider == "tavily" and bool(tavily_api_key),
+        "rag_embedding_provider": rag_embedding_provider,
+        "rag_full_text_fetch_enabled": _env_bool("RAG_FETCH_FULL_TEXT", False),
+        "rag_chunk_size": get_int_env("RAG_CHUNK_SIZE", 900),
+        "rag_chunk_overlap": get_int_env("RAG_CHUNK_OVERLAP", 120),
         "debug_routes_enabled": debug_routes_enabled(),
         "symbol_cache_ttl_seconds": get_int_env("SYMBOL_CACHE_TTL_SECONDS", 86400),
         "market_cache_ttl_seconds": get_int_env("MARKET_CACHE_TTL_SECONDS", 300),

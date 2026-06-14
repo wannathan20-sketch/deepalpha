@@ -236,13 +236,28 @@ RAG 检索层使用 Chroma 作为向量库：
 
 ```text
 Tavily Search / mock search
-→ documents
-→ Chroma Vector Store
+→ documents / optional fetched full text
+→ chunking + metadata
+→ Chroma Vector Store / in-memory fallback
 → RAG Retriever
 → Industry Analyst
+→ Source Quality / Citation Checker
 ```
 
-当前使用本地 hash embedding，避免额外下载 embedding 模型；如果 `chromadb` 不可用，会自动回退到简单内存关键词检索。
+当前默认使用确定性本地 hash embedding，避免额外下载 embedding 模型；也可以通过 `RAG_EMBEDDING_PROVIDER=openai` 切换到 OpenAI Embeddings。检索结果会保留 `chunk_id`、`source_domain`、`source_type`、`source_grade`、`retrieval_score`、`published_at` 和 `retrieved_at` 等元数据，便于来源质量评估和引用覆盖检查。如果 `chromadb` 不可用，会自动回退到内存关键词检索。
+
+RAG 相关配置：
+
+```env
+RAG_EMBEDDING_PROVIDER=hash
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+RAG_FETCH_FULL_TEXT=false
+RAG_FETCH_TIMEOUT_SECONDS=6
+RAG_CHUNK_SIZE=900
+RAG_CHUNK_OVERLAP=120
+```
+
+当 `RAG_FETCH_FULL_TEXT=true` 时，系统会尝试抓取搜索结果 URL 的正文并清洗 HTML；抓取失败时会回退到搜索摘要，不会中断报告生成。Citation Checker 会统计 claim-level citation coverage、linked sources、official sources 和 retrieval scores，作为报告可信度的质量信号。
 
 Chroma 索引会持久化到：
 
@@ -256,7 +271,7 @@ data/chroma
 curl "http://127.0.0.1:8000/debug/rag?company_name=Tesla"
 ```
 
-该接口会返回 query、vector_store、collection_name、chunks_count、chunks 和 sources。
+该接口会返回 query、vector_store、embedding_provider、collection_name、documents_count、chunks_count、chunks 和 sources。
 
 可以通过 `/config` 检查当前运行模式。该接口只返回 provider、model 和是否启用，不会返回真实 API Key：
 

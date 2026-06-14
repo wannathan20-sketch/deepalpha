@@ -76,9 +76,18 @@ def test_debug_rag() -> None:
     assert data["company_name"] == "Tesla"
     assert "query" in data
     assert "vector_store" in data
+    assert "embedding_provider" in data
     assert "chunks_count" in data
+    assert "documents_count" in data
     assert "chunks" in data
     assert "sources" in data
+    assert data["chunks_count"] >= 1
+    first_chunk = data["chunks"][0]
+    assert "chunk_id" in first_chunk
+    assert "source_domain" in first_chunk
+    assert "source_type" in first_chunk
+    assert "retrieval_score" in first_chunk
+    assert "source_grade" in first_chunk
 
 
 def test_debug_routes_can_be_disabled(monkeypatch) -> None:
@@ -337,6 +346,62 @@ def test_financial_profile_supports_ifrs_20f_foreign_issuer(monkeypatch) -> None
     assert profile["debt"] == 3413000000
     assert profile["revenue_change_percent"] == -11.75
     assert profile["metrics"]["revenue"]["taxonomy_namespace"] == "ifrs-full"
+
+
+def test_rag_chunks_include_metadata(monkeypatch) -> None:
+    from app.rag.retriever import retrieve_industry_context
+
+    monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "hash")
+    rag_context = retrieve_industry_context("NVIDIA", "NVIDIA competitors regulation")
+
+    assert rag_context["embedding_provider"] == "hash"
+    assert rag_context["documents_count"] >= 1
+    assert rag_context["chunks"]
+    chunk = rag_context["chunks"][0]
+    assert chunk["chunk_id"]
+    assert chunk["company_name"] == "NVIDIA"
+    assert chunk["source_type"] == "mock"
+    assert isinstance(chunk["retrieval_score"], float)
+    assert rag_context["sources"][0]["chunk_id"] == chunk["chunk_id"]
+
+
+def test_citation_checker_reports_claim_coverage() -> None:
+    from app.services.citation_checker import check_citations
+
+    result = check_citations(
+        {
+            "industry": {
+                "summary": "Industry summary",
+                "key_points": ["Demand is growing"],
+                "claims": [
+                    {
+                        "claim": "Demand is growing",
+                        "source_url": "https://www.sec.gov/example",
+                    },
+                    {
+                        "claim": "Competition is intense",
+                        "source_url": "",
+                    },
+                ],
+            }
+        },
+        [
+            {
+                "title": "SEC filing",
+                "url": "https://www.sec.gov/example",
+                "source_type": "regulatory_filing",
+                "source_grade": "A",
+                "retrieval_score": 0.9,
+            }
+        ],
+    )
+
+    assert result["passed"] is True
+    assert result["total_claims"] == 2
+    assert result["cited_claims"] == 1
+    assert result["claim_citation_coverage"] == 0.5
+    assert result["official_sources_count"] == 1
+    assert result["retrieval_scores"] == [0.9]
 
 
 def test_analyze() -> None:
