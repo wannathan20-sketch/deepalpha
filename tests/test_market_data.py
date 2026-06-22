@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest
 
 from app.tools.market_symbols import normalize_market_symbol
+from app.tools.market_data import get_market_chart
 from app.tools.market_providers import (
     AkShareProvider,
     BaostockProvider,
@@ -206,3 +207,109 @@ def test_baostock_adapter_logs_out(monkeypatch) -> None:
 
     assert result["points"][0]["close"] == 11.0
     assert calls == ["logout"]
+
+
+class FakeProvider:
+    def __init__(self, name: str, *, markets: set[str], points=None, available=True, error=None) -> None:
+        self.name = name
+        self.markets = markets
+        self.points = points if points is not None else []
+        self.available = available
+        self.error = error
+        self.calls = 0
+
+    def supports(self, market: str) -> bool:
+        return market in self.markets
+
+    def is_available(self) -> bool:
+        return self.available
+
+    def fetch_chart(self, request) -> dict:
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return {"symbol": request.symbol.local_symbol, "points": self.points}
+
+
+VALID_POINTS = [
+    {"time": 1, "open": 9, "high": 11, "low": 8, "close": 10, "volume": 100},
+    {"time": 2, "open": 10, "high": 12, "low": 9, "close": 11, "volume": 120},
+]
+
+
+def test_auto_router_uses_market_specific_primary(monkeypatch) -> None:
+    akshare = FakeProvider("akshare", markets={"cn", "hk"}, points=VALID_POINTS)
+    yahoo = FakeProvider("yahoo", markets={"cn", "hk", "us"}, points=VALID_POINTS)
+    monkeypatch.setattr("app.tools.market_data._provider_registry", lambda: {"akshare": akshare, "yahoo": yahoo})
+    monkeypatch.setenv("MARKET_DATA_PROVIDER_ORDER_CN", "akshare,yahoo")
+
+    result = get_market_chart("600519", "auto")
+
+    assert result["provider"] == "akshare"
+    assert result["market"] == "cn"
+    assert result["canonical_symbol"] == "SH600519"
+    assert result["provider_attempts"] == [
+        {"provider": "akshare", "status": "success", "reason": "", "duration_ms": result["provider_attempts"][0]["duration_ms"]}
+    ]
+    assert yahoo.calls == 0
+
+
+def test_auto_router_falls_back_and_records_attempts(monkeypatch) -> None:
+    akshare = FakeProvider("akshare", markets={"cn"}, error=RuntimeError("secret=do-not-leak"))
+    efinance = FakeProvider("efinance", markets={"cn"}, points=[])
+    baostock = FakeProvider("baostock", markets={"cn"}, available=False)
+    yahoo = FakeProvider("yahoo", markets={"cn"}, points=VALID_POINTS)
+    monkeypatch.setattr(
+        "app.tools.market_data._provider_registry",
+        lambda: {item.name: item for item in (akshare, efinance, baostock, yahoo)},
+    )
+    monkeypatch.setenv("MARKET_DATA_PROVIDER_ORDER_CN", "akshare,efinance,baostock,yahoo")
+
+    result = get_market_chart("600519", "auto")
+
+    assert result["provider"] == "yahoo"
+    assert result["provider_mode"] == "auto"
+    assert result["fallback_from"] == "akshare"
+    assert [attempt["status"] for attempt in result["provider_attempts"]] == [
+        "failed",
+        "empty",
+        "unavailable",
+        "success",
+    ]
+    assert "do-not-leak" not in str(result["provider_attempts"])
+
+
+def test_explicit_provider_never_falls_back(monkeypatch) -> None:
+    akshare = FakeProvider("akshare", markets={"cn"}, points=[])
+    yahoo = FakeProvider("yahoo", markets={"cn"}, points=VALID_POINTS)
+    monkeypatch.setattr("app.tools.market_data._provider_registry", lambda: {"akshare": akshare, "yahoo": yahoo})
+
+    result = get_market_chart("600519", "akshare")
+
+    assert result["points"] == []
+    assert [attempt["provider"] for attempt in result["provider_attempts"]] == ["akshare"]
+    assert yahoo.calls == 0
+
+
+def test_all_provider_failures_return_stable_error(monkeypatch) -> None:
+    yahoo = FakeProvider("yahoo", markets={"us"}, error=TimeoutError("network detail"))
+    finnhub = FakeProvider("finnhub", markets={"us"}, available=False)
+    monkeypatch.setattr("app.tools.market_data._provider_registry", lambda: {"yahoo": yahoo, "finnhub": finnhub})
+    monkeypatch.setenv("MARKET_DATA_PROVIDER_ORDER_US", "yahoo,finnhub")
+
+    result = get_market_chart("AAPL", "auto")
+
+    assert result["points"] == []
+    assert result["error"] == "All market data providers failed."
+    assert [attempt["status"] for attempt in result["provider_attempts"]] == ["failed", "unavailable"]
+
+
+def test_invalid_or_duplicate_order_entries_are_ignored(monkeypatch) -> None:
+    yahoo = FakeProvider("yahoo", markets={"us"}, points=VALID_POINTS)
+    monkeypatch.setattr("app.tools.market_data._provider_registry", lambda: {"yahoo": yahoo})
+    monkeypatch.setenv("MARKET_DATA_PROVIDER_ORDER_US", "unknown,yahoo,yahoo")
+
+    result = get_market_chart("AAPL", "auto")
+
+    assert result["provider"] == "yahoo"
+    assert yahoo.calls == 1
