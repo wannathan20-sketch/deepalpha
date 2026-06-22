@@ -925,7 +925,7 @@ function ProjectIntro({ onBack }) {
           {[
             ["项目定位", "多智能体虚拟投研团队，用于生成结构化投研报告。"],
             ["核心流程", "Planner -> RAG Retriever -> Analysts -> Risk Manager -> Committee -> Report。"],
-            ["RAG 能力", "使用 Tavily/mock documents 与 Chroma Vector Store 提供行业上下文。"],
+            ["RAG 能力", "使用 Brave、BlockBeats、Tavily 与 Chroma Vector Store 提供行业上下文；检索失败时明确标记数据不可用。"],
             ["Memory 能力", "短期 thread memory + SQLite 长期研究历史和 Watchlist。"],
           ].map(([title, text]) => (
             <div className="rounded-lg border border-slate-800 bg-slate-900 p-5" key={title}>

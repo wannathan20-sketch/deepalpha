@@ -2,6 +2,8 @@ import os
 
 from dotenv import load_dotenv
 
+from app.errors import RuntimeConfigurationError
+
 
 load_dotenv()
 
@@ -36,6 +38,54 @@ def get_int_env(name: str, default: int) -> int:
 
 def get_access_code() -> str:
     return os.getenv("DEEPALPHA_ACCESS_CODE", "").strip()
+
+
+def get_app_environment() -> str:
+    return os.getenv("APP_ENV", "development").strip().lower()
+
+
+def is_production() -> bool:
+    return get_app_environment() == "production"
+
+
+def validate_runtime_config() -> None:
+    if not is_production():
+        return
+
+    llm_provider = os.getenv("LLM_PROVIDER", "mock").strip().lower()
+    if llm_provider not in {"openai", "deepseek"}:
+        raise RuntimeConfigurationError(
+            "Production requires LLM_PROVIDER=openai or LLM_PROVIDER=deepseek."
+        )
+
+    key_name = "OPENAI_API_KEY" if llm_provider == "openai" else "DEEPSEEK_API_KEY"
+    if not os.getenv(key_name, "").strip():
+        raise RuntimeConfigurationError(f"Production LLM provider requires {key_name}.")
+
+    search_provider = os.getenv("SEARCH_PROVIDER", "mock").strip().lower()
+    if search_provider == "multi":
+        providers = [
+            provider.strip().lower()
+            for provider in os.getenv("SEARCH_PROVIDERS", "brave,blockbeats,tavily").split(",")
+            if provider.strip()
+        ]
+    else:
+        providers = [search_provider]
+
+    provider_keys = {
+        "brave": "BRAVE_SEARCH_API_KEY",
+        "blockbeats": "BLOCKBEATS_API_KEY",
+        "tavily": "TAVILY_API_KEY",
+    }
+    unsupported = [provider for provider in providers if provider not in provider_keys]
+    if unsupported:
+        raise RuntimeConfigurationError(
+            "Production SEARCH_PROVIDER must use brave, blockbeats, tavily, or multi."
+        )
+    if not any(os.getenv(provider_keys[provider], "").strip() for provider in providers):
+        raise RuntimeConfigurationError(
+            "Production requires at least one configured search API key."
+        )
 
 
 def get_runtime_config() -> dict:

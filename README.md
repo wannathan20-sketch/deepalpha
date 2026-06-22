@@ -79,7 +79,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-默认配置使用 mock LLM 和 mock 搜索，无需 API Key：
+默认配置使用仅限本地开发的 mock LLM 和 mock 搜索，无需 API Key：
 
 ```bash
 uvicorn app.main:app --reload
@@ -131,7 +131,7 @@ OPENAI_API_KEY=your_key
 OPENAI_MODEL=gpt-5
 ```
 
-未配置有效 Key 或调用失败时，分析节点会降级到 mock 输出，并在结果中保留相应状态。
+开发环境中，未配置有效 Key 或调用失败时可以使用 mock 输出，便于本地调试和自动化测试。生产环境不允许 mock：缺少 LLM 配置时服务拒绝启动，运行中的 LLM 请求失败时报告接口返回 HTTP 503。
 
 ### 多源搜索
 
@@ -144,7 +144,7 @@ BLOCKBEATS_API_KEY=your_key
 TAVILY_API_KEY=your_key
 ```
 
-多源模式会并发查询已配置的 provider，按 `SEARCH_PROVIDERS` 的顺序交错合并并去重。单个来源失败不会中断其他来源；所有真实来源均不可用时回退到 mock 搜索。
+多源模式会并发查询已配置的 provider，按 `SEARCH_PROVIDERS` 的顺序交错合并并去重。单个来源失败不会中断其他来源。所有真实来源均不可用时，开发环境可回退到 mock 搜索；生产环境返回空来源，并将 RAG 上下文标记为 `fetch_failed`。
 
 ### RAG
 
@@ -161,6 +161,7 @@ RAG_CHUNK_OVERLAP=120
 ### 生产环境
 
 ```env
+APP_ENV=production
 ENABLE_DEBUG_ROUTES=false
 CORS_ALLOW_ORIGIN_REGEX=https://app.example.com
 DEEPALPHA_ACCESS_CODE=change-this-value
@@ -177,6 +178,12 @@ SEC_USER_AGENT=DeepAlpha contact@example.com
 - `REPORT_GLOBAL_DAILY_LIMIT`
 
 限额设为 `0` 时关闭对应限制。
+
+`APP_ENV=production` 会启用启动校验：
+
+- `LLM_PROVIDER` 必须是 `openai` 或 `deepseek`，且对应 API Key 必须存在。
+- `SEARCH_PROVIDER` 必须指向 Brave、BlockBeats、Tavily 或 `multi`，且至少配置一个可用搜索 Key。
+- mock provider 只能在 `development` 或测试环境使用。
 
 ## API
 
@@ -274,7 +281,7 @@ docker run --env-file .env -p 8000:8000 deepalpha
 
 - A 股和港股财务披露源尚未接入。
 - 免费行情和搜索 provider 的可用性、频率限制与字段完整度可能变化。
-- mock 模式用于开发与测试，不能作为真实投研依据。
+- mock 模式仅用于开发与测试；生产启动校验会拒绝 mock provider。
 - 当前访问码和限流机制适合受控演示，不等同于完整用户认证系统。
 - 模型输出可能包含错误，引用覆盖率也不能替代人工核验。
 

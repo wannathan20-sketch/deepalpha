@@ -1,4 +1,5 @@
 from app.llm.client import generate_text
+from app.errors import LLMProviderError
 from app.agents.llm_helpers import (
     build_claims,
     build_data_quality,
@@ -135,6 +136,8 @@ def analyze(company_name: str, context: dict) -> dict:
             system_prompt="你是深研 Alpha 的 Committee Agent，负责综合投研判断。",
             max_tokens=900,
         )
+    except LLMProviderError:
+        raise
     except Exception:
         summary = _fallback_summary(company_name, sources_count)
 

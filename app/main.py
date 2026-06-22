@@ -1,11 +1,21 @@
 import hmac
+from contextlib import asynccontextmanager
 from threading import Lock
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from app.config import debug_routes_enabled, get_access_code, get_cors_allow_origin_regex, get_int_env, get_runtime_config
+from app.config import (
+    debug_routes_enabled,
+    get_access_code,
+    get_cors_allow_origin_regex,
+    get_int_env,
+    get_runtime_config,
+    validate_runtime_config,
+)
+from app.errors import LLMProviderError
 from app.graph import run_deepalpha_graph
 from app.memory.store import (
     add_to_watchlist,
@@ -33,7 +43,17 @@ from app.tools.market_data import get_market_chart
 from app.tools.symbol_lookup import lookup_symbol
 
 
-app = FastAPI(title="DeepAlpha", description="Multi-agent virtual investment research team")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    validate_runtime_config()
+    yield
+
+
+app = FastAPI(
+    title="DeepAlpha",
+    description="Multi-agent virtual investment research team",
+    lifespan=lifespan,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=get_cors_allow_origin_regex(),
@@ -41,6 +61,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(LLMProviderError)
+async def llm_provider_error_handler(request: Request, exc: LLMProviderError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 # In-memory task state is intentionally lightweight for the MVP; use Redis/DB for multi-worker deployments.

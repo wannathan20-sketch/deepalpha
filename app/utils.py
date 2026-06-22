@@ -1,9 +1,23 @@
+from app.errors import LLMProviderError, SearchProviderError
+
+
 def safe_run_agent(agent_name: str, func, company_name: str, context: dict) -> dict:
     """Protect the graph from a single failed agent.
     防止单个 Agent 异常中断整条投研链路，并返回可追踪的兜底结果。
     """
     try:
         return func(company_name, context)
+    except LLMProviderError:
+        raise
+    except SearchProviderError as exc:
+        return {
+            "agent": agent_name,
+            "summary": "External search data is unavailable.",
+            "key_points": ["Search provider request failed", "No synthetic sources were used"],
+            "confidence": 0.0,
+            "sources": [],
+            "error": str(exc),
+        }
     except Exception as exc:
         return {
             "agent": agent_name,

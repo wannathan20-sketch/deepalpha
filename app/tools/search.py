@@ -6,6 +6,9 @@ from html.parser import HTMLParser
 import requests
 from dotenv import load_dotenv
 
+from app.config import is_production
+from app.errors import SearchProviderError
+
 
 load_dotenv()
 
@@ -219,13 +222,23 @@ def _rank_by_provider_order(results_by_provider: dict[str, list[dict]], provider
 
 def search_public_info(query: str, limit: int = 5) -> list[dict]:
     providers = _configured_providers()
+    if is_production() and "mock" in providers:
+        raise SearchProviderError("Production search cannot use the mock provider.")
+
     if len(providers) == 1:
+        failure_reason = f"{providers[0]} search returned no results."
         try:
-            return _dedupe_results(_search_provider(providers[0], query, limit), limit) or _mock_search(query, limit)
+            results = _dedupe_results(_search_provider(providers[0], query, limit), limit)
+            if results:
+                return results
         except requests.RequestException as exc:
             print(f"{providers[0]} search failed: {exc}")
+            failure_reason = f"{providers[0]} search failed: {exc}"
         except ValueError as exc:
             print(f"{providers[0]} search response parsing failed: {exc}")
+            failure_reason = f"{providers[0]} search response parsing failed: {exc}"
+        if is_production():
+            raise SearchProviderError(failure_reason)
         return _mock_search(query, limit)
 
     results_by_provider: dict[str, list[dict]] = {}
@@ -248,4 +261,11 @@ def search_public_info(query: str, limit: int = 5) -> list[dict]:
             if provider_results:
                 results_by_provider[provider] = provider_results
 
-    return _rank_by_provider_order(results_by_provider, providers, limit) or _mock_search(query, limit)
+    ranked_results = _rank_by_provider_order(results_by_provider, providers, limit)
+    if ranked_results:
+        return ranked_results
+    if is_production():
+        raise SearchProviderError(
+            f"All configured search providers failed or returned no results: {', '.join(providers)}."
+        )
+    return _mock_search(query, limit)

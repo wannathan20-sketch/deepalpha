@@ -1,1 +1,1 @@
-"""Mock investment research agents for DeepAlpha."""
+"""Investment research agents for DeepAlpha."""

@@ -2,6 +2,9 @@ import os
 
 from dotenv import load_dotenv
 
+from app.config import is_production
+from app.errors import LLMProviderError
+
 
 load_dotenv()
 
@@ -61,19 +64,24 @@ def generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800) -
 
     if llm_provider == "openai" and openai_api_key:
         try:
-            return _generate_with_openai_compatible(
+            response_text = _generate_with_openai_compatible(
                 prompt=prompt,
                 api_key=openai_api_key,
                 model=os.getenv("OPENAI_MODEL", "gpt-5"),
                 system_prompt=system_prompt,
                 max_tokens=max_tokens,
             )
-        except Exception:
+        except Exception as exc:
+            if is_production():
+                raise LLMProviderError(f"openai LLM request failed: {exc}") from exc
             return _mock_generate_text(prompt, system_prompt, max_tokens)
+        if is_production() and not response_text.strip():
+            raise LLMProviderError("openai LLM returned an empty response.")
+        return response_text
 
     if llm_provider == "deepseek" and deepseek_api_key:
         try:
-            return _generate_with_openai_compatible(
+            response_text = _generate_with_openai_compatible(
                 prompt=prompt,
                 api_key=deepseek_api_key,
                 model="deepseek-chat",
@@ -81,7 +89,16 @@ def generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800) -
                 system_prompt=system_prompt,
                 max_tokens=max_tokens,
             )
-        except Exception:
+        except Exception as exc:
+            if is_production():
+                raise LLMProviderError(f"deepseek LLM request failed: {exc}") from exc
             return _mock_generate_text(prompt, system_prompt, max_tokens)
+        if is_production() and not response_text.strip():
+            raise LLMProviderError("deepseek LLM returned an empty response.")
+        return response_text
 
+    if is_production():
+        raise LLMProviderError(
+            f"Production LLM provider '{llm_provider}' is unavailable or missing credentials."
+        )
     return _mock_generate_text(prompt, system_prompt, max_tokens)

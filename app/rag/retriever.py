@@ -1,5 +1,6 @@
 from app.rag.loader import load_company_industry_docs
 from app.rag.vector_store import ChromaVectorStore
+from app.errors import SearchProviderError
 
 
 def _collection_name(company_name: str) -> str:
@@ -7,7 +8,20 @@ def _collection_name(company_name: str) -> str:
 
 
 def retrieve_industry_context(company_name: str, query: str) -> dict:
-    documents = load_company_industry_docs(company_name)
+    try:
+        documents = load_company_industry_docs(company_name)
+    except SearchProviderError as exc:
+        return {
+            "query": query,
+            "context_status": "fetch_failed",
+            "vector_store": "unavailable",
+            "embedding_provider": "unavailable",
+            "collection_name": _collection_name(company_name),
+            "documents_count": 0,
+            "chunks": [],
+            "sources": [],
+            "error": str(exc),
+        }
     vector_store = ChromaVectorStore(
         documents,
         collection_name=_collection_name(company_name),
