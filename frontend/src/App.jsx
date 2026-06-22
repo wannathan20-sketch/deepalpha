@@ -716,7 +716,7 @@ function TradingViewFallback({ symbol }) {
   return <div ref={containerRef} className="h-[320px] w-full overflow-hidden rounded-md bg-slate-950" />;
 }
 
-function MarketChart({ symbol, displaySymbol, provider, tradingViewSymbol, searchQuery = "" }) {
+function MarketChart({ symbol, displaySymbol, provider, exchange = "", tradingViewSymbol, searchQuery = "" }) {
   const [chartData, setChartData] = useState(null);
   const [chartStatus, setChartStatus] = useState("idle");
   const fallbackSymbol = tradingViewSymbol || displaySymbol || symbol;
@@ -737,7 +737,7 @@ function MarketChart({ symbol, displaySymbol, provider, tradingViewSymbol, searc
 
     const controller = new AbortController();
     setChartStatus("loading");
-    requestJson(`/market/chart?symbol=${encodeURIComponent(symbol)}&range=6mo&interval=1d&provider=${encodeURIComponent(provider)}`, {
+    requestJson(`/market/chart?symbol=${encodeURIComponent(symbol)}&exchange=${encodeURIComponent(exchange)}&range=6mo&interval=1d&provider=${encodeURIComponent(provider)}`, {
       signal: controller.signal,
     })
       .then((data) => {
@@ -853,14 +853,16 @@ function MarketChart({ symbol, displaySymbol, provider, tradingViewSymbol, searc
             {changePercent.toFixed(2)}%)
           </div>
           <div className="mt-2 flex flex-wrap justify-end gap-2">
-            <a
-              className="inline-flex rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-cyan-400 hover:text-cyan-200"
-              href={chartData.yahoo_chart_url}
-              rel="noreferrer"
-              target="_blank"
-            >
-              打开来源 K 线
-            </a>
+            {(chartData.source_url || chartData.yahoo_chart_url) && (
+              <a
+                className="inline-flex rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-cyan-400 hover:text-cyan-200"
+                href={chartData.source_url || chartData.yahoo_chart_url}
+                rel="noreferrer"
+                target="_blank"
+              >
+                打开来源 K 线
+              </a>
+            )}
             <a
               className="inline-flex rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-cyan-400 hover:text-cyan-200"
               href={tradingViewUrl}
@@ -1027,6 +1029,7 @@ export default function App() {
   const [symbolCandidates, setSymbolCandidates] = useState([]);
   const [symbolLookupStatus, setSymbolLookupStatus] = useState("idle");
   const [marketProvider, setMarketProvider] = useState("auto");
+  const backendMarketProvider = marketProvider === "tradingview" ? "auto" : marketProvider;
   const [financialProfile, setFinancialProfile] = useState(null);
   const [financialStatus, setFinancialStatus] = useState("idle");
   const [error, setError] = useState("");
@@ -1197,7 +1200,7 @@ export default function App() {
           symbol: ticker.trim(),
           yahoo_symbol: yahooSymbol,
           exchange: matchedSymbol?.exchange || "",
-          data_provider: marketProvider,
+          data_provider: backendMarketProvider,
         }),
       });
 
@@ -1255,7 +1258,7 @@ export default function App() {
           company_name: nextCompany,
           symbol: ticker.trim(),
           yahoo_symbol: yahooSymbol,
-          data_provider: marketProvider,
+          data_provider: backendMarketProvider,
         }),
       });
       setWatchlistCompany("");
@@ -1526,12 +1529,18 @@ export default function App() {
                 onChange={(event) => setMarketProvider(event.target.value)}
               >
                 <option value="auto">Auto</option>
+                <option value="yahoo">Yahoo</option>
+                <option value="akshare">AkShare</option>
+                <option value="efinance">Efinance</option>
+                <option value="baostock">Baostock</option>
+                <option value="finnhub">Finnhub</option>
                 <option value="tradingview">TradingView</option>
               </select>
             }
           >
             <MarketChart
               displaySymbol={ticker}
+              exchange={matchedSymbol?.exchange || ""}
               provider={marketProvider}
               searchQuery={companyName}
               symbol={yahooSymbol}

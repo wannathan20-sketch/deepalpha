@@ -1,3 +1,4 @@
+akshare==1.18.64
 chromadb==1.5.9
 fastapi==0.136.3
 langgraph==1.2.2

@@ -173,6 +173,22 @@ curl http://127.0.0.1:8000/report/tasks/{task_id}
 
 如果请求中提供 `symbol`、`yahoo_symbol` 和 `data_provider`，后端会在生成报告前拉取 6 个月日线行情，计算最新价、区间涨跌幅、6 个月高低点、MA20/MA60、趋势和年化波动率，并写入 Technical Agent 上下文与 Markdown 报告的“行情数据摘要”章节。
 
+### A 股、港股和美股行情路由
+
+`data_provider=auto` 会按市场自动选择并降级：
+
+- A 股：AkShare → Efinance → Baostock → Yahoo
+- 港股：Yahoo → AkShare
+- 美股：Yahoo → Finnhub
+
+AkShare 是核心 A 股依赖。Efinance 和 Baostock 在 Python 3.13 下作为可选增强源，需要时可安装：
+
+```bash
+pip install efinance==0.5.8 baostock==0.9.2
+```
+
+Finnhub 仅在配置 `FINNHUB_API_KEY` 后启用。响应中的 `provider_attempts`、`fallback_from` 和 `provider_mode` 可用于判断数据是否发生降级。显式指定 provider 时不会自动切换到其他来源。
+
 美股标的会额外尝试接入 SEC EDGAR companyfacts：
 
 ```bash
