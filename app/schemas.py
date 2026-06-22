@@ -1,6 +1,47 @@
-from typing import Any
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class ContextStatus(str, Enum):
+    AVAILABLE = "available"
+    MISSING = "missing"
+    NOT_SUPPORTED = "not_supported"
+    FALLBACK = "fallback"
+    STALE = "stale"
+    ESTIMATED = "estimated"
+    PARTIAL = "partial"
+    FETCH_FAILED = "fetch_failed"
+
+
+class ContextItem(BaseModel):
+    status: ContextStatus
+    value: Any = None
+    source: str | None = None
+    timestamp: str | None = None
+    fallback_from: str | None = None
+    missing_reason: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DataQuality(BaseModel):
+    overall_score: int = Field(ge=0, le=100)
+    level: Literal["good", "usable", "limited", "poor"]
+    limitations: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class AnalysisContextPack(BaseModel):
+    version: Literal["1.0"] = "1.0"
+    company: str
+    market: ContextItem
+    financials: ContextItem
+    rag: ContextItem
+    data_quality: DataQuality
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class HealthResponse(BaseModel):
