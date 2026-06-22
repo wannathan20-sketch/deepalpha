@@ -1,11 +1,22 @@
 import sys
+from datetime import date, datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
 
 from app.tools.market_symbols import normalize_market_symbol
+from app.tools.market_providers import (
+    AkShareProvider,
+    BaostockProvider,
+    EfinanceProvider,
+    FinnhubProvider,
+    MarketChartRequest,
+    YahooProvider,
+    normalize_points,
+)
 
 
 @pytest.mark.parametrize(
@@ -40,3 +51,158 @@ def test_normalize_market_symbol(
 def test_normalize_market_symbol_rejects_empty_input() -> None:
     with pytest.raises(ValueError, match="Market symbol is required"):
         normalize_market_symbol("   ")
+
+
+def test_normalize_points_sorts_deduplicates_and_drops_invalid_rows() -> None:
+    points = normalize_points(
+        [
+            {"time": "2026-01-03", "open": "10", "high": "12", "low": "9", "close": "11", "volume": "100"},
+            {"time": "2026-01-02", "open": 8, "high": 10, "low": 7, "close": 9, "volume": None},
+            {"time": "2026-01-03", "open": 10, "high": 13, "low": 9, "close": 12, "volume": 120},
+            {"time": "2026-01-04", "close": None},
+        ]
+    )
+
+    assert [point["close"] for point in points] == [9.0, 12.0]
+    assert points[0]["time"] == int(datetime(2026, 1, 2, tzinfo=timezone.utc).timestamp())
+    assert points[0]["volume"] is None
+
+
+def test_optional_provider_availability(monkeypatch) -> None:
+    monkeypatch.setattr("app.tools.market_providers.importlib.util.find_spec", lambda name: None)
+
+    assert AkShareProvider().is_available() is False
+    assert EfinanceProvider().is_available() is False
+    assert BaostockProvider().is_available() is False
+
+
+def test_finnhub_requires_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("FINNHUB_API_KEY", raising=False)
+    assert FinnhubProvider().is_available() is False
+
+
+class FakeFrame:
+    empty = False
+
+    def __init__(self, records: list[dict]) -> None:
+        self.records = records
+
+    def to_dict(self, orient: str) -> list[dict]:
+        assert orient == "records"
+        return self.records
+
+
+def provider_request(raw_symbol: str) -> MarketChartRequest:
+    return MarketChartRequest(
+        symbol=normalize_market_symbol(raw_symbol),
+        range_="6mo",
+        interval="1d",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 6, 30),
+    )
+
+
+@pytest.mark.parametrize(
+    ("provider", "markets"),
+    [
+        (YahooProvider(), {"cn", "hk", "us"}),
+        (AkShareProvider(), {"cn", "hk"}),
+        (EfinanceProvider(), {"cn"}),
+        (BaostockProvider(), {"cn"}),
+        (FinnhubProvider(), {"us"}),
+    ],
+)
+def test_provider_support_matrix(provider, markets: set[str]) -> None:
+    assert {market for market in {"cn", "hk", "us"} if provider.supports(market)} == markets
+
+
+def test_akshare_adapter_maps_chinese_columns(monkeypatch) -> None:
+    frame = FakeFrame([{"日期": "2026-01-02", "开盘": 10, "最高": 12, "最低": 9, "收盘": 11, "成交量": 100}])
+    module = SimpleNamespace(stock_zh_a_hist=lambda **kwargs: frame)
+    monkeypatch.setattr(AkShareProvider, "_module", lambda self: module)
+
+    result = AkShareProvider().fetch_chart(provider_request("600519"))
+
+    assert result["points"][0]["close"] == 11.0
+    assert result["exchange"] == "SH"
+
+
+def test_efinance_adapter_maps_chinese_columns(monkeypatch) -> None:
+    frame = FakeFrame([{"日期": "2026-01-02", "开盘": 10, "最高": 12, "最低": 9, "收盘": 11, "成交量": 100}])
+    stock = SimpleNamespace(get_quote_history=lambda *args, **kwargs: frame)
+    monkeypatch.setattr(EfinanceProvider, "_module", lambda self: SimpleNamespace(stock=stock))
+
+    result = EfinanceProvider().fetch_chart(provider_request("600519"))
+
+    assert result["points"][0]["volume"] == 100.0
+
+
+def test_yahoo_adapter_maps_chart_payload(monkeypatch) -> None:
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "chart": {
+                    "result": [{
+                        "timestamp": [1],
+                        "meta": {"currency": "USD", "exchangeName": "NMS"},
+                        "indicators": {"quote": [{"open": [10], "high": [12], "low": [9], "close": [11], "volume": [100]}]},
+                    }]
+                }
+            }
+
+    monkeypatch.setattr("app.tools.market_providers.requests.get", lambda *args, **kwargs: Response())
+
+    result = YahooProvider().fetch_chart(provider_request("AAPL"))
+
+    assert result["points"][0]["close"] == 11.0
+    assert result["currency"] == "USD"
+
+
+def test_finnhub_adapter_maps_candles(monkeypatch) -> None:
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"s": "ok", "t": [1], "o": [10], "h": [12], "l": [9], "c": [11], "v": [100]}
+
+    monkeypatch.setenv("FINNHUB_API_KEY", "test-key")
+    monkeypatch.setattr("app.tools.market_providers.requests.get", lambda *args, **kwargs: Response())
+
+    result = FinnhubProvider().fetch_chart(provider_request("AAPL"))
+
+    assert result["points"][0]["close"] == 11.0
+
+
+def test_baostock_adapter_logs_out(monkeypatch) -> None:
+    class QueryResult:
+        error_code = "0"
+        fields = ["date", "open", "high", "low", "close", "volume"]
+
+        def __init__(self) -> None:
+            self.used = False
+
+        def next(self) -> bool:
+            if self.used:
+                return False
+            self.used = True
+            return True
+
+        def get_row_data(self) -> list[str]:
+            return ["2026-01-02", "10", "12", "9", "11", "100"]
+
+    calls = []
+    module = SimpleNamespace(
+        login=lambda: SimpleNamespace(error_code="0"),
+        query_history_k_data_plus=lambda *args, **kwargs: QueryResult(),
+        logout=lambda: calls.append("logout"),
+    )
+    monkeypatch.setattr(BaostockProvider, "_module", lambda self: module)
+
+    result = BaostockProvider().fetch_chart(provider_request("600519"))
+
+    assert result["points"][0]["close"] == 11.0
+    assert calls == ["logout"]

@@ -1,0 +1,311 @@
+from __future__ import annotations
+
+import importlib
+import importlib.util
+import math
+import os
+from dataclasses import dataclass
+from datetime import date, datetime, timezone
+from typing import Protocol
+from urllib.parse import quote
+
+import requests
+
+from app.tools.market_symbols import MarketSymbol
+
+
+@dataclass(frozen=True)
+class MarketChartRequest:
+    symbol: MarketSymbol
+    range_: str
+    interval: str
+    start_date: date
+    end_date: date
+
+
+class MarketDataProvider(Protocol):
+    name: str
+
+    def supports(self, market: str) -> bool: ...
+
+    def is_available(self) -> bool: ...
+
+    def fetch_chart(self, request: MarketChartRequest) -> dict: ...
+
+
+def _number(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _timestamp(value: object) -> int | None:
+    if isinstance(value, datetime):
+        current = value
+    elif isinstance(value, date):
+        current = datetime(value.year, value.month, value.day)
+    elif isinstance(value, (int, float)):
+        raw = float(value)
+        return int(raw / 1000 if raw > 10_000_000_000 else raw)
+    else:
+        text = str(value or "").strip().replace("Z", "+00:00")
+        if not text:
+            return None
+        try:
+            current = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    return int(current.timestamp())
+
+
+def normalize_points(rows: list[dict]) -> list[dict]:
+    deduplicated: dict[int, dict] = {}
+    for row in rows:
+        timestamp = _timestamp(row.get("time"))
+        close = _number(row.get("close"))
+        if timestamp is None or close is None:
+            continue
+        deduplicated[timestamp] = {
+            "time": timestamp,
+            "open": _number(row.get("open")),
+            "high": _number(row.get("high")),
+            "low": _number(row.get("low")),
+            "close": close,
+            "volume": _number(row.get("volume")),
+        }
+    return [deduplicated[key] for key in sorted(deduplicated)]
+
+
+def _records(frame: object) -> list[dict]:
+    if frame is None or getattr(frame, "empty", True):
+        return []
+    records = frame.to_dict("records")
+    return records if isinstance(records, list) else []
+
+
+class _ImportProvider:
+    module_name = ""
+
+    def is_available(self) -> bool:
+        return importlib.util.find_spec(self.module_name) is not None
+
+    def _module(self):
+        return importlib.import_module(self.module_name)
+
+
+class YahooProvider:
+    name = "yahoo"
+
+    def supports(self, market: str) -> bool:
+        return market in {"cn", "hk", "us"}
+
+    def is_available(self) -> bool:
+        return True
+
+    def fetch_chart(self, request: MarketChartRequest) -> dict:
+        symbol = request.symbol.yahoo_symbol
+        response = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(symbol)}",
+            params={"range": request.range_, "interval": request.interval},
+            headers={"User-Agent": "DeepAlpha/0.1"},
+            timeout=int(os.getenv("MARKET_DATA_TIMEOUT_SECONDS", "10")),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        result = (payload.get("chart", {}).get("result") or [{}])[0]
+        timestamps = result.get("timestamp") or []
+        quotes = ((result.get("indicators") or {}).get("quote") or [{}])[0]
+        rows = []
+        for index, timestamp in enumerate(timestamps):
+            rows.append(
+                {
+                    "time": timestamp,
+                    "open": (quotes.get("open") or [None] * len(timestamps))[index],
+                    "high": (quotes.get("high") or [None] * len(timestamps))[index],
+                    "low": (quotes.get("low") or [None] * len(timestamps))[index],
+                    "close": (quotes.get("close") or [None] * len(timestamps))[index],
+                    "volume": (quotes.get("volume") or [None] * len(timestamps))[index],
+                }
+            )
+        meta = result.get("meta") or {}
+        source_url = f"https://finance.yahoo.com/chart/{quote(symbol)}"
+        return {
+            "symbol": symbol,
+            "currency": meta.get("currency", ""),
+            "exchange": meta.get("exchangeName", ""),
+            "source_url": source_url,
+            "yahoo_chart_url": source_url,
+            "points": normalize_points(rows),
+        }
+
+
+class AkShareProvider(_ImportProvider):
+    name = "akshare"
+    module_name = "akshare"
+
+    def supports(self, market: str) -> bool:
+        return market in {"cn", "hk"}
+
+    def fetch_chart(self, request: MarketChartRequest) -> dict:
+        ak = self._module()
+        kwargs = {
+            "symbol": request.symbol.local_symbol,
+            "period": "daily",
+            "start_date": request.start_date.strftime("%Y%m%d"),
+            "end_date": request.end_date.strftime("%Y%m%d"),
+            "adjust": "qfq",
+        }
+        frame = ak.stock_zh_a_hist(**kwargs) if request.symbol.market == "cn" else ak.stock_hk_hist(**kwargs)
+        rows = [
+            {
+                "time": row.get("日期"),
+                "open": row.get("开盘"),
+                "high": row.get("最高"),
+                "low": row.get("最低"),
+                "close": row.get("收盘"),
+                "volume": row.get("成交量"),
+            }
+            for row in _records(frame)
+        ]
+        return {
+            "symbol": request.symbol.local_symbol,
+            "exchange": request.symbol.exchange,
+            "points": normalize_points(rows),
+        }
+
+
+class EfinanceProvider(_ImportProvider):
+    name = "efinance"
+    module_name = "efinance"
+
+    def supports(self, market: str) -> bool:
+        return market == "cn"
+
+    def fetch_chart(self, request: MarketChartRequest) -> dict:
+        ef = self._module()
+        frame = ef.stock.get_quote_history(
+            request.symbol.local_symbol,
+            beg=request.start_date.strftime("%Y%m%d"),
+            end=request.end_date.strftime("%Y%m%d"),
+            klt=101,
+            fqt=1,
+        )
+        rows = [
+            {
+                "time": row.get("日期"),
+                "open": row.get("开盘"),
+                "high": row.get("最高"),
+                "low": row.get("最低"),
+                "close": row.get("收盘"),
+                "volume": row.get("成交量"),
+            }
+            for row in _records(frame)
+        ]
+        return {
+            "symbol": request.symbol.local_symbol,
+            "exchange": request.symbol.exchange,
+            "points": normalize_points(rows),
+        }
+
+
+class BaostockProvider(_ImportProvider):
+    name = "baostock"
+    module_name = "baostock"
+
+    def supports(self, market: str) -> bool:
+        return market == "cn"
+
+    def fetch_chart(self, request: MarketChartRequest) -> dict:
+        bs = self._module()
+        login = bs.login()
+        if str(login.error_code) != "0":
+            raise RuntimeError("Baostock login failed")
+        code = f"{request.symbol.exchange.lower()}.{request.symbol.local_symbol}"
+        try:
+            result = bs.query_history_k_data_plus(
+                code,
+                "date,open,high,low,close,volume",
+                start_date=request.start_date.isoformat(),
+                end_date=request.end_date.isoformat(),
+                frequency="d",
+                adjustflag="2",
+            )
+            if str(result.error_code) != "0":
+                raise RuntimeError("Baostock history query failed")
+            rows = []
+            while result.next():
+                values = dict(zip(result.fields, result.get_row_data()))
+                rows.append({"time": values.get("date"), **values})
+        finally:
+            bs.logout()
+        return {
+            "symbol": code,
+            "exchange": request.symbol.exchange,
+            "points": normalize_points(rows),
+        }
+
+
+class FinnhubProvider:
+    name = "finnhub"
+
+    def supports(self, market: str) -> bool:
+        return market == "us"
+
+    def is_available(self) -> bool:
+        return bool(os.getenv("FINNHUB_API_KEY", "").strip())
+
+    def fetch_chart(self, request: MarketChartRequest) -> dict:
+        response = requests.get(
+            "https://finnhub.io/api/v1/stock/candle",
+            params={
+                "symbol": request.symbol.local_symbol,
+                "resolution": "D",
+                "from": int(
+                    datetime.combine(
+                        request.start_date,
+                        datetime.min.time(),
+                        tzinfo=timezone.utc,
+                    ).timestamp()
+                ),
+                "to": int(
+                    datetime.combine(
+                        request.end_date,
+                        datetime.max.time(),
+                        tzinfo=timezone.utc,
+                    ).timestamp()
+                ),
+                "token": os.getenv("FINNHUB_API_KEY", ""),
+            },
+            timeout=int(os.getenv("MARKET_DATA_TIMEOUT_SECONDS", "10")),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get("s") != "ok":
+            return {"symbol": request.symbol.local_symbol, "points": []}
+        rows = [
+            {
+                "time": timestamp,
+                "open": open_,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": volume,
+            }
+            for timestamp, open_, high, low, close, volume in zip(
+                payload.get("t", []),
+                payload.get("o", []),
+                payload.get("h", []),
+                payload.get("l", []),
+                payload.get("c", []),
+                payload.get("v", []),
+            )
+        ]
+        return {
+            "symbol": request.symbol.local_symbol,
+            "exchange": request.symbol.exchange,
+            "points": normalize_points(rows),
+        }
