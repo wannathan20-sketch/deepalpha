@@ -94,6 +94,7 @@ class AnalyzeResponse(BaseModel):
     report_editor: dict[str, Any]
     market_profile: dict[str, Any]
     financial_profile: dict[str, Any]
+    analysis_context: AnalysisContextPack
     citation_check: dict[str, Any]
     trace: dict[str, Any]
 

@@ -422,6 +422,17 @@ def test_analyze() -> None:
     assert "report_editor" in data
     assert "market_profile" in data
     assert "financial_profile" in data
+    assert "analysis_context" in data
+    analysis_context = data["analysis_context"]
+    assert analysis_context["version"] == "1.0"
+    assert analysis_context["company"] == "OpenAI"
+    assert set(analysis_context) >= {
+        "market",
+        "financials",
+        "rag",
+        "data_quality",
+        "created_at",
+    }
     assert "citation_check" in data
     assert "passed" in data["citation_check"]
     assert "checked_agents" in data["citation_check"]
