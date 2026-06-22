@@ -127,6 +127,35 @@ def test_market_profile_marks_provider_error_as_fetch_failed(monkeypatch) -> Non
     assert profile["reason"] == "timeout"
 
 
+def test_market_profile_marks_successful_provider_fallback(monkeypatch) -> None:
+    from app.services.market_summary import build_market_profile
+
+    monkeypatch.setattr(
+        "app.services.market_summary.get_market_chart",
+        lambda *args, **kwargs: {
+            "provider": "yahoo",
+            "provider_mode": "auto",
+            "fallback_from": "akshare",
+            "provider_attempts": [
+                {"provider": "akshare", "status": "failed", "reason": "TimeoutError", "duration_ms": 1},
+                {"provider": "yahoo", "status": "success", "reason": "", "duration_ms": 2},
+            ],
+            "market": "cn",
+            "exchange": "SH",
+            "points": [
+                {"time": 1, "close": 10},
+                {"time": 2, "close": 11},
+            ],
+        },
+    )
+
+    profile = build_market_profile(symbol="SH600519", exchange="SSE")
+
+    assert profile["context_status"] == "fallback"
+    assert profile["fallback_from"] == "akshare"
+    assert profile["provider_attempts"][0]["status"] == "failed"
+
+
 def test_financial_profile_distinguishes_missing_and_unsupported() -> None:
     from app.services.financials import build_financial_profile
 

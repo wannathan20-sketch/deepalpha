@@ -171,6 +171,23 @@ def test_market_chart_empty_symbol() -> None:
         assert "cache_hit" in data
 
 
+def test_market_chart_forwards_exchange(monkeypatch) -> None:
+    captured = {}
+
+    def fake_chart(symbol, provider, range_, interval, exchange=None):
+        captured.update(symbol=symbol, provider=provider, exchange=exchange)
+        return {"provider": "akshare", "points": []}
+
+    monkeypatch.setattr("app.main.get_market_chart", fake_chart)
+    response = client.get(
+        "/market/chart",
+        params={"symbol": "00700", "exchange": "HKEX", "provider": "auto"},
+    )
+
+    assert response.status_code == 200
+    assert captured == {"symbol": "00700", "provider": "auto", "exchange": "HKEX"}
+
+
 def test_market_chart_rate_limit(monkeypatch) -> None:
     monkeypatch.setenv("MARKET_CHART_RATE_LIMIT", "1")
 

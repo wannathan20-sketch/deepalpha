@@ -213,7 +213,14 @@ def symbol_lookup(query: str, request: Request) -> dict:
 
 
 @app.get("/market/chart")
-def market_chart(symbol: str, request: Request, range: str = "6mo", interval: str = "1d", provider: str = "auto") -> dict:
+def market_chart(
+    symbol: str,
+    request: Request,
+    range: str = "6mo",
+    interval: str = "1d",
+    provider: str = "auto",
+    exchange: str | None = None,
+) -> dict:
     rate_limit(
         request,
         "market_chart",
@@ -222,12 +229,21 @@ def market_chart(symbol: str, request: Request, range: str = "6mo", interval: st
     )
     # Market data has a short TTL so dashboards feel fresh without hammering the provider.
     # 行情数据使用较短 TTL，在保持新鲜度的同时避免过度请求外部数据源。
-    cache_key = f"market:{provider.lower()}:{symbol.strip().lower()}:{range}:{interval}"
+    cache_key = (
+        f"market:{provider.lower()}:{symbol.strip().lower()}:"
+        f"{str(exchange or '').lower()}:{range}:{interval}"
+    )
     try:
         data, cache_hit = cache.get_or_set(
             cache_key,
             get_int_env("MARKET_CACHE_TTL_SECONDS", 300),
-            lambda: get_market_chart(symbol, provider, range, interval),
+            lambda: get_market_chart(
+                symbol,
+                provider,
+                range,
+                interval,
+                exchange=exchange,
+            ),
         )
         result = {**data, "cache_hit": cache_hit}
         log_event(

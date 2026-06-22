@@ -15,8 +15,6 @@ def build_market_profile(
     """
     provider_name = provider or "auto"
     resolved_symbol = (yahoo_symbol or symbol or "").strip()
-    if ":" in resolved_symbol:
-        resolved_symbol = resolved_symbol.split(":", 1)[1]
 
     if not resolved_symbol:
         return {
@@ -25,7 +23,13 @@ def build_market_profile(
             "reason": "No market symbol provided.",
         }
 
-    chart = get_market_chart(resolved_symbol, provider_name, "6mo", "1d")
+    chart = get_market_chart(
+        resolved_symbol,
+        provider_name,
+        "6mo",
+        "1d",
+        exchange=exchange,
+    )
     points = chart.get("points", [])
     if len(points) < 2:
         fetch_error = str(chart.get("error") or "").strip()
@@ -36,6 +40,8 @@ def build_market_profile(
             "symbol": resolved_symbol,
             "provider": chart.get("provider", provider_name),
             "exchange": exchange or chart.get("exchange", ""),
+            "market": chart.get("market", ""),
+            "provider_attempts": chart.get("provider_attempts", []),
         }
 
     # Work from closes only so partially missing OHLCV rows do not break the trend summary.
@@ -57,7 +63,10 @@ def build_market_profile(
 
     return {
         "enabled": True,
-        "context_status": "available",
+        "context_status": "fallback" if chart.get("fallback_from") else "available",
+        "fallback_from": chart.get("fallback_from"),
+        "provider_attempts": chart.get("provider_attempts", []),
+        "market": chart.get("market", ""),
         "symbol": symbol,
         "yahoo_symbol": resolved_symbol,
         "provider": chart.get("provider", provider_name),
@@ -73,5 +82,5 @@ def build_market_profile(
         "ma20": round(ma20, 4),
         "ma60": round(ma60, 4),
         "trend": trend,
-        "source_url": chart.get("yahoo_chart_url", ""),
+        "source_url": chart.get("source_url") or chart.get("yahoo_chart_url", ""),
     }
