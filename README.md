@@ -1,103 +1,97 @@
-# 深研 Alpha / DeepAlpha
+# DeepAlpha
 
-## 项目定位
+DeepAlpha 是一个面向 A 股、港股和美股的多智能体投研系统。它将行情、财务、新闻与行业检索结果整理为统一上下文，由多个分析角色协作完成研究、风险审查、引用检查和 Markdown 报告生成。
 
-多智能体虚拟投研团队。
+项目目前处于原型阶段，适合技术验证、投研流程实验和内部演示。输出仅用于研究辅助，不构成投资建议或交易指令。
 
-DeepAlpha 是一个基于 FastAPI 的后端项目，用于模拟虚拟投研团队围绕公司进行结构化研究、风险审查、综合决策、引用检查和 Markdown 报告生成。
+## 主要能力
 
-## 核心能力
+- 使用 LangGraph 编排规划、基本面、财务、估值、技术面、新闻、情绪、多空辩论、交易、风控和委员会等分析节点。
+- 通过统一行情路由支持 A 股、港股和美股，并记录 provider 尝试、降级路径和数据质量状态。
+- 接入 Brave、BlockBeats 和 Tavily，可并发检索、去重、排序，并在外部服务失败时降级。
+- 使用 Chroma 构建 RAG 检索层，保留来源域名、来源类型、发布时间、检索时间和质量分级。
+- 对美股接入 SEC EDGAR companyfacts，提取常用利润表、资产负债表和现金流指标。
+- 提供引用覆盖检查、Agent 执行轨迹、数据质量评分和 Markdown 报告编辑。
+- 使用 SQLite 保存研究历史与关注列表；提供同步报告接口和轻量异步任务接口。
+- React/Vite 工作台支持公司搜索、行情图表、报告生成、历史记录和 Watchlist。
 
-- Planner Agent
-- Fundamental Analyst
-- Technical Analyst
-- News Analyst
-- Sentiment Analyst
-- Bull Analyst
-- Bear Analyst
-- Trader Agent
-- Risk Manager
-- Committee Agent
-- Citation Checker
-- Agent Trace
-- Failure Fallback
+## 工作流程
 
-## 系统流程
-
-```text
-用户输入公司名
-↓
-Planner 制定研究计划
-↓
-多个分析师 Agent 分析
-↓
-Risk Manager 风控审查
-↓
-Committee 综合汇总
-↓
-生成 Markdown 投研报告
+```mermaid
+flowchart LR
+    A["公司与证券代码"] --> B["行情、财务和检索数据"]
+    B --> C["AnalysisContext 数据质量层"]
+    C --> D["Planner"]
+    D --> E["专业分析 Agent"]
+    E --> F["Bull / Bear"]
+    F --> G["Trader / Risk Manager"]
+    G --> H["Source Quality / Committee"]
+    H --> I["Citation Check / Report Editor"]
+    I --> J["Markdown 投研报告"]
 ```
 
-## 本地运行
+## 数据源
 
-安装依赖：
+### 行情数据
+
+当 `data_provider=auto` 时，系统按市场依次尝试以下来源：
+
+| 市场 | 默认顺序 | 说明 |
+| --- | --- | --- |
+| A 股 | AkShare -> Efinance -> Baostock -> Yahoo | AkShare 是核心依赖，Efinance 和 Baostock 为可选增强源 |
+| 港股 | Yahoo -> AkShare | Yahoo 为默认来源，失败后尝试 AkShare |
+| 美股 | Yahoo -> Finnhub | Finnhub 需要配置 `FINNHUB_API_KEY` |
+
+行情响应包含 `provider_attempts`、`fallback_from` 和 `provider_mode`，可用于判断是否发生数据源降级。显式指定 provider 时不会自动切换到其他来源。
+
+### 财务与公开信息
+
+| 数据类型 | 来源 | 覆盖范围 |
+| --- | --- | --- |
+| 公司财务 | SEC EDGAR companyfacts | 当前主要覆盖美股和提交 20-F 的外国发行人 |
+| 通用网页检索 | Brave Search、Tavily | 需要对应 API Key |
+| 垂直资讯 | BlockBeats | 适用于 Web3、链上和加密市场信息，需要 API Key |
+| 本地测试 | Mock provider | 不用于真实投研结论 |
+
+A 股和港股的交易所财报披露尚未接入，相关分析可能显示为 `not_supported`、`missing` 或 `partial`，不会伪造缺失数据。
+
+## 技术栈
+
+- 后端：Python、FastAPI、Pydantic
+- Agent 编排：LangGraph
+- LLM：OpenAI、DeepSeek 或本地 mock
+- 检索：Chroma、Brave Search、BlockBeats、Tavily
+- 数据：AkShare、Yahoo Finance、Finnhub、SEC EDGAR；Efinance 和 Baostock 可选
+- 持久化：SQLite、Chroma
+- 前端：React、Vite、Tailwind CSS、Lucide Icons
+- 测试：pytest
+
+## 快速开始
+
+### 1. 安装后端
+
+建议使用 Python 3.11 或 3.12 创建虚拟环境：
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-复制环境变量示例：
-
-```bash
 cp .env.example .env
 ```
 
-默认使用 mock 搜索和 mock LLM：
-
-```env
-SEARCH_PROVIDER=mock
-TAVILY_API_KEY=
-LLM_PROVIDER=mock
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-5
-DEEPSEEK_API_KEY=
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-ENABLE_DEBUG_ROUTES=true
-CORS_ALLOW_ORIGIN_REGEX=http://(127\.0\.0\.1|localhost):\d+
-DEEPALPHA_ACCESS_CODE=
-DEEPALPHA_DB_PATH=data/deepalpha.sqlite3
-SYMBOL_CACHE_TTL_SECONDS=86400
-MARKET_CACHE_TTL_SECONDS=300
-FINANCIALS_CACHE_TTL_SECONDS=21600
-SYMBOL_LOOKUP_RATE_LIMIT=60
-MARKET_CHART_RATE_LIMIT=120
-FINANCIALS_RATE_LIMIT=60
-SEC_USER_AGENT=DeepAlpha research prototype contact@example.com
-REPORT_USER_DAILY_LIMIT=3
-REPORT_CREATE_RATE_LIMIT_PER_HOUR=5
-REPORT_CREATE_RATE_LIMIT_PER_DAY=10
-REPORT_GLOBAL_DAILY_LIMIT=50
-```
-
-启动服务：
+默认配置使用 mock LLM 和 mock 搜索，无需 API Key：
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-启动极简 Streamlit 前端：
+服务启动后可访问：
 
-```bash
-streamlit run frontend.py
-```
+- API：`http://127.0.0.1:8000`
+- OpenAPI：`http://127.0.0.1:8000/docs`
+- 健康检查：`http://127.0.0.1:8000/health`
 
-前端会调用：
-
-```text
-POST http://127.0.0.1:8000/report
-```
-
-启动 React/Vite 前端：
+### 2. 启动 React 前端
 
 ```bash
 cd frontend
@@ -105,569 +99,185 @@ npm install
 npm run dev
 ```
 
-React 前端默认请求后端：
-
-```text
-http://127.0.0.1:8000
-```
-
-如需部署到客户环境，在 `frontend/.env` 中配置 API 地址：
+前端默认连接 `http://127.0.0.1:8000`。连接远程后端时，在 `frontend/.env` 中设置：
 
 ```env
 VITE_API_BASE=https://api.example.com
 ```
 
-React 前端使用 Tailwind CSS + Lucide Icons，主界面为三栏投研工作台：
-
-- 左侧：推荐标的与 Watchlist
-- 中间：公司搜索、候选股票、Yahoo/TradingView K 线、报告生成
-- 右侧：报告结果与历史记录
-
-生产环境建议关闭调试接口，并将 CORS 限制为正式前端域名：
-
-```env
-ENABLE_DEBUG_ROUTES=false
-CORS_ALLOW_ORIGIN_REGEX=https://www.example.com
-DEEPALPHA_DB_PATH=/var/lib/deepalpha/deepalpha.sqlite3
-DEEPALPHA_ACCESS_CODE=change-this-access-code
-```
-
-当 `ENABLE_DEBUG_ROUTES=false` 时，React 首页不会展示“技术说明”入口，相关 debug 接口也会返回 404。
-
-面向客户使用时，首页会展示一次性风险确认弹窗；生成报告区域也会保留风险提示。DeepAlpha 输出仅用于研究辅助，不构成投资建议、交易指令或收益承诺。
-
-历史报告和 Watchlist 已使用 SQLite 持久化，默认数据库位置为：
-
-```text
-data/deepalpha.sqlite3
-```
-
-表结构已预留 `tenant_id` 和 `user_id` 字段，后续可接入登录和多租户隔离。
-
-外部 provider 查询已加入内存 TTL 缓存和基础限流：
-
-- `SYMBOL_CACHE_TTL_SECONDS`：公司名解析缓存时间，默认 86400 秒
-- `MARKET_CACHE_TTL_SECONDS`：K 线缓存时间，默认 300 秒
-- `FINANCIALS_CACHE_TTL_SECONDS`：SEC 财报摘要缓存时间，默认 21600 秒
-- `SYMBOL_LOOKUP_RATE_LIMIT`：每分钟 symbol lookup 次数，默认 60
-- `MARKET_CHART_RATE_LIMIT`：每分钟 K 线请求次数，默认 120
-- `FINANCIALS_RATE_LIMIT`：每分钟 SEC 财报摘要请求次数，默认 60
-- `SEC_USER_AGENT`：SEC EDGAR 请求 User-Agent，生产环境请改为明确项目和联系邮箱
-- `DEEPALPHA_ACCESS_CODE`：报告生成访问码；为空时不启用访问码保护
-- `REPORT_USER_DAILY_LIMIT`：每个浏览器用户每天最多生成报告数，默认 3，设为 0 可关闭
-- `REPORT_CREATE_RATE_LIMIT_PER_HOUR`：每个 IP 每小时最多生成报告数，默认 5，设为 0 可关闭
-- `REPORT_CREATE_RATE_LIMIT_PER_DAY`：每个 IP 每天最多生成报告数，默认 10，设为 0 可关闭
-- `REPORT_GLOBAL_DAILY_LIMIT`：全站每天最多生成报告数，默认 50，设为 0 可关闭
-
-接口日志会以 JSON 形式输出到应用日志，包含 provider、cache hit、点位数量和任务状态等字段。
-
-报告生成支持异步任务接口，适合前端避免长请求超时：
+仓库还保留了一个简化的 Streamlit 入口：
 
 ```bash
-curl -X POST http://127.0.0.1:8000/report/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"company_name":"Tesla","symbol":"NASDAQ:TSLA","yahoo_symbol":"TSLA","data_provider":"auto"}'
-
-curl http://127.0.0.1:8000/report/tasks/{task_id}
+streamlit run frontend.py
 ```
 
-如果请求中提供 `symbol`、`yahoo_symbol` 和 `data_provider`，后端会在生成报告前拉取 6 个月日线行情，计算最新价、区间涨跌幅、6 个月高低点、MA20/MA60、趋势和年化波动率，并写入 Technical Agent 上下文与 Markdown 报告的“行情数据摘要”章节。
+## 配置
 
-### A 股、港股和美股行情路由
+完整配置及默认值见 [`.env.example`](.env.example)。以下是常用选项。
 
-`data_provider=auto` 会按市场自动选择并降级：
-
-- A 股：AkShare → Efinance → Baostock → Yahoo
-- 港股：Yahoo → AkShare
-- 美股：Yahoo → Finnhub
-
-AkShare 是核心 A 股依赖。Efinance 和 Baostock 在 Python 3.13 下作为可选增强源，需要时可安装：
-
-```bash
-pip install efinance==0.5.8 baostock==0.9.2
-```
-
-Finnhub 仅在配置 `FINNHUB_API_KEY` 后启用。响应中的 `provider_attempts`、`fallback_from` 和 `provider_mode` 可用于判断数据是否发生降级。显式指定 provider 时不会自动切换到其他来源。
-
-美股标的会额外尝试接入 SEC EDGAR companyfacts：
-
-```bash
-curl "http://127.0.0.1:8000/financials/latest?symbol=MRVL&exchange=NASDAQ"
-```
-
-该接口会完成 ticker -> CIK -> companyfacts/latest filing metadata 的最小闭环，抽取收入、毛利率、营业利润率、净利润、EPS、经营现金流、CapEx、现金、债务、资产、负债和股东权益，并写入 Financial Analyst、Valuation Analyst 和 Markdown 报告的“财报数据摘要”章节。当前 MVP 主要覆盖美股；港股/A 股需后续接 HKEX、交易所披露或授权数据源。
-
-如需启用 Tavily 真实搜索：
-
-```env
-SEARCH_PROVIDER=tavily
-TAVILY_API_KEY=你的 Tavily API Key
-```
-
-Search Tool 会调用：
-
-```text
-POST https://api.tavily.com/search
-```
-
-并将 Tavily 返回结果统一转换为：
-
-```json
-[
-  {
-    "title": "...",
-    "url": "...",
-    "snippet": "..."
-  }
-]
-```
-
-如果 Tavily 调用失败，系统会打印错误并自动回退到 mock 搜索结果，不会中断 `/analyze`。
-
-如需启用 OpenAI LLM：
-
-```env
-LLM_PROVIDER=openai
-OPENAI_API_KEY=你的 OpenAI API Key
-OPENAI_MODEL=gpt-5
-```
-
-如需启用 DeepSeek LLM：
+### LLM
 
 ```env
 LLM_PROVIDER=deepseek
-DEEPSEEK_API_KEY=你的 DeepSeek API Key
+DEEPSEEK_API_KEY=your_key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
-DeepSeek 使用 OpenAI SDK 兼容模式，模型固定为：
+也可以使用 OpenAI：
 
-```text
-deepseek-chat
+```env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your_key
+OPENAI_MODEL=gpt-5
 ```
 
-如果没有配置 API Key，或真实服务调用失败，系统会自动回退到 mock 结果，不会中断 `/analyze`。
+未配置有效 Key 或调用失败时，分析节点会降级到 mock 输出，并在结果中保留相应状态。
 
-RAG 检索层使用 Chroma 作为向量库：
+### 多源搜索
 
-```text
-Tavily Search / mock search
-→ documents / optional fetched full text
-→ chunking + metadata
-→ Chroma Vector Store / in-memory fallback
-→ RAG Retriever
-→ Industry Analyst
-→ Source Quality / Citation Checker
+```env
+SEARCH_PROVIDER=multi
+SEARCH_PROVIDERS=brave,blockbeats,tavily
+SEARCH_MAX_WORKERS=3
+BRAVE_SEARCH_API_KEY=your_key
+BLOCKBEATS_API_KEY=your_key
+TAVILY_API_KEY=your_key
 ```
 
-当前默认使用确定性本地 hash embedding，避免额外下载 embedding 模型；也可以通过 `RAG_EMBEDDING_PROVIDER=openai` 切换到 OpenAI Embeddings。检索结果会保留 `chunk_id`、`source_domain`、`source_type`、`source_grade`、`retrieval_score`、`published_at` 和 `retrieved_at` 等元数据，便于来源质量评估和引用覆盖检查。如果 `chromadb` 不可用，会自动回退到内存关键词检索。
+多源模式会并发查询已配置的 provider，按 `SEARCH_PROVIDERS` 的顺序交错合并并去重。单个来源失败不会中断其他来源；所有真实来源均不可用时回退到 mock 搜索。
 
-RAG 相关配置：
+### RAG
 
 ```env
 RAG_EMBEDDING_PROVIDER=hash
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 RAG_FETCH_FULL_TEXT=false
 RAG_FETCH_TIMEOUT_SECONDS=6
 RAG_CHUNK_SIZE=900
 RAG_CHUNK_OVERLAP=120
 ```
 
-当 `RAG_FETCH_FULL_TEXT=true` 时，系统会尝试抓取搜索结果 URL 的正文并清洗 HTML；抓取失败时会回退到搜索摘要，不会中断报告生成。Citation Checker 会统计 claim-level citation coverage、linked sources、official sources 和 retrieval scores，作为报告可信度的质量信号。
+默认 hash embedding 可离线运行。设置 `RAG_EMBEDDING_PROVIDER=openai` 后可使用 OpenAI Embeddings。Chroma 不可用时，检索层会降级到内存关键词检索。
 
-Chroma 索引会持久化到：
-
-```text
-data/chroma
-```
-
-可以用 RAG 诊断接口查看检索结果：
-
-```bash
-curl "http://127.0.0.1:8000/debug/rag?company_name=Tesla"
-```
-
-该接口会返回 query、vector_store、embedding_provider、collection_name、documents_count、chunks_count、chunks 和 sources。
-
-可以通过 `/config` 检查当前运行模式。该接口只返回 provider、model 和是否启用，不会返回真实 API Key：
-
-```bash
-curl http://127.0.0.1:8000/config
-```
-
-## Docker 运行
-
-构建镜像：
-
-```bash
-docker build -t deepalpha .
-```
-
-运行容器：
-
-```bash
-docker run --env-file .env -p 8000:8000 deepalpha
-```
-
-如果只使用 mock 模式，也可以不传 `.env`：
-
-```bash
-docker run -p 8000:8000 deepalpha
-```
-
-## 上云部署：Render + Vercel
-
-推荐最小上线架构：
-
-```text
-Vercel: React/Vite 前端
-Render: FastAPI 后端
-Render Persistent Disk: SQLite + Chroma 数据目录
-DeepSeek: LLM
-Tavily: 搜索/RAG 外部检索
-```
-
-### 1. 部署后端到 Render
-
-仓库根目录已提供 `render.yaml`。在 Render 中选择 Blueprint 或 Web Service 均可。
-
-后端启动命令：
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port $PORT
-```
-
-Render 后端建议配置环境变量：
+### 生产环境
 
 ```env
-LLM_PROVIDER=deepseek
-DEEPSEEK_API_KEY=你的 DeepSeek API Key
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-SEARCH_PROVIDER=tavily
-TAVILY_API_KEY=你的 Tavily API Key
-
 ENABLE_DEBUG_ROUTES=false
-CORS_ALLOW_ORIGIN_REGEX=https://你的前端域名
-
-DEEPALPHA_ACCESS_CODE=给体验用户的访问码
+CORS_ALLOW_ORIGIN_REGEX=https://app.example.com
+DEEPALPHA_ACCESS_CODE=change-this-value
 DEEPALPHA_DB_PATH=/var/lib/deepalpha/deepalpha.sqlite3
 CHROMA_DB_PATH=/var/lib/deepalpha/chroma
-
-REPORT_USER_DAILY_LIMIT=3
-REPORT_CREATE_RATE_LIMIT_PER_HOUR=5
-REPORT_CREATE_RATE_LIMIT_PER_DAY=10
-REPORT_GLOBAL_DAILY_LIMIT=50
+SEC_USER_AGENT=DeepAlpha contact@example.com
 ```
 
-如果使用 `render.yaml`，`DEEPSEEK_API_KEY`、`TAVILY_API_KEY`、`DEEPALPHA_ACCESS_CODE`、`CORS_ALLOW_ORIGIN_REGEX` 需要在 Render 控制台手动填写。
-
-### 2. 部署前端到 Vercel
-
-前端目录已提供 `frontend/vercel.json`。
-
-在 Vercel 中将项目 Root Directory 设置为：
-
-```text
-frontend
-```
-
-Vercel 前端环境变量：
-
-```env
-VITE_API_BASE=https://你的 Render 后端域名
-```
-
-前端构建命令：
-
-```bash
-npm run build
-```
-
-输出目录：
-
-```text
-dist
-```
-
-### 3. 上线检查清单
-
-- Render `/health` 返回 `{"status":"ok"}`
-- Vercel 前端 `VITE_API_BASE` 指向 Render 后端
-- Render `CORS_ALLOW_ORIGIN_REGEX` 精确匹配 Vercel 域名
-- `ENABLE_DEBUG_ROUTES=false`
-- DeepSeek/Tavily API Key 只存在后端环境变量中
-- `DEEPALPHA_ACCESS_CODE` 已设置
-- 生成报告触发访问码弹窗并能成功生成
-- 达到限额时前端提示“报告生成次数已达当前上限”
-
-## 免绑卡部署：Hugging Face Spaces + Vercel
-
-如果 Render 要求添加付款方式，可以先用 Hugging Face Spaces 托管 FastAPI 后端，Vercel 托管前端。
-
-推荐结构：
-
-```text
-Hugging Face Spaces: Docker/FastAPI 后端
-Vercel: React/Vite 前端
-DeepSeek: LLM
-Tavily: 搜索/RAG 外部检索
-```
-
-### 1. 创建 Hugging Face Space
-
-在 Hugging Face 新建 Space：
-
-- SDK：`Docker`
-- Repository：可以选择导入 GitHub 仓库，或手动同步代码
-- Visibility：演示可设 Public；如不希望公开代码和日志，可设 Private
-
-本项目 Dockerfile 默认监听：
-
-```text
-0.0.0.0:7860
-```
-
-Hugging Face Spaces 会自动使用该端口。
-
-### 2. 配置 Hugging Face Secrets
-
-在 Space 的 Settings -> Variables and secrets 中添加：
-
-```env
-LLM_PROVIDER=deepseek
-DEEPSEEK_API_KEY=你的 DeepSeek API Key
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-SEARCH_PROVIDER=tavily
-TAVILY_API_KEY=你的 Tavily API Key
-
-ENABLE_DEBUG_ROUTES=false
-CORS_ALLOW_ORIGIN_REGEX=https://你的 Vercel 前端域名
-
-DEEPALPHA_ACCESS_CODE=给体验用户的访问码
-DEEPALPHA_DB_PATH=/data/deepalpha.sqlite3
-CHROMA_DB_PATH=/data/chroma
-
-REPORT_USER_DAILY_LIMIT=3
-REPORT_CREATE_RATE_LIMIT_PER_HOUR=5
-REPORT_CREATE_RATE_LIMIT_PER_DAY=10
-REPORT_GLOBAL_DAILY_LIMIT=50
-```
-
-注意：免费 Hugging Face Spaces 的文件系统不适合作为长期可靠数据库。演示版可以接受；正式客户试用建议迁移到 VPS、Render/Railway 付费实例，或接外部 Postgres/Redis。
-
-### 3. 验证后端
-
-Space 构建完成后，访问：
-
-```text
-https://你的用户名-你的space名.hf.space/health
-```
-
-返回：
-
-```json
-{"status":"ok"}
-```
-
-表示后端正常。
-
-### 4. 部署前端到 Vercel
-
-Vercel 项目 Root Directory 选择：
-
-```text
-frontend
-```
-
-设置环境变量：
-
-```env
-VITE_API_BASE=https://你的用户名-你的space名.hf.space
-```
-
-部署完成后，回到 Hugging Face Secrets，把：
-
-```env
-CORS_ALLOW_ORIGIN_REGEX=https://你的 Vercel 前端域名
-```
-
-改成真实 Vercel 域名，并重启 Space。
-
-## Zeabur 部署：Zeabur + Vercel
-
-Zeabur 支持从 GitHub 创建服务，也支持使用仓库中的 Dockerfile 部署。Zeabur 会通过 `PORT` 环境变量决定服务端口，本项目 Dockerfile 已兼容 `${PORT}`。
-
-### 1. 部署后端到 Zeabur
-
-在 Zeabur 中：
-
-1. 创建 Project
-2. 创建 Service
-3. 选择 GitHub Repository
-4. 选择 `wannathan20-sketch/deepalpha`
-5. 使用根目录 Dockerfile 部署
-
-后端环境变量可参考 `.env.zeabur.example`：
-
-```env
-LLM_PROVIDER=deepseek
-DEEPSEEK_API_KEY=你的 DeepSeek API Key
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-SEARCH_PROVIDER=tavily
-TAVILY_API_KEY=你的 Tavily API Key
-
-ENABLE_DEBUG_ROUTES=false
-CORS_ALLOW_ORIGIN_REGEX=https://你的 Vercel 前端域名
-
-DEEPALPHA_ACCESS_CODE=给体验用户的访问码
-DEEPALPHA_DB_PATH=/data/deepalpha.sqlite3
-CHROMA_DB_PATH=/data/chroma
-
-REPORT_USER_DAILY_LIMIT=3
-REPORT_CREATE_RATE_LIMIT_PER_HOUR=5
-REPORT_CREATE_RATE_LIMIT_PER_DAY=10
-REPORT_GLOBAL_DAILY_LIMIT=50
-```
-
-Zeabur 部署完成后，访问：
-
-```text
-https://你的-zeabur-后端域名/health
-```
-
-返回 `{"status":"ok"}` 表示后端正常。
-
-### 2. 部署前端到 Vercel
-
-Vercel 项目 Root Directory：
-
-```text
-frontend
-```
-
-Vercel 环境变量：
-
-```env
-VITE_API_BASE=https://你的-zeabur-后端域名
-```
-
-前端部署完成后，回到 Zeabur，把：
-
-```env
-CORS_ALLOW_ORIGIN_REGEX=https://你的 Vercel 前端域名
-```
-
-改成真实前端域名并重新部署后端。
-
-## API 示例
-
-健康检查：
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
-运行模式诊断：
-
-```bash
-curl http://127.0.0.1:8000/config
-```
-
-完整投研分析接口，适合开发调试：
-
-```bash
-curl -X POST http://127.0.0.1:8000/analyze \
-  -H "Content-Type: application/json" \
-  -d '{"company_name":"OpenAI"}'
-```
-
-可选传入 `thread_id`，用于 LangGraph 短期记忆和任务状态追踪；不传时系统会自动生成：
-
-```bash
-curl -X POST http://127.0.0.1:8000/analyze \
-  -H "Content-Type: application/json" \
-  -d '{"company_name":"OpenAI","thread_id":"demo-thread-001"}'
-```
-
-`/analyze` 返回内容包含：
-
-```text
-company_name
-thread_id
-status
-research_plan
-team_results
-final_report
-markdown_report
-citation_check
-trace
-```
-
-简洁报告接口，适合前端和面试演示：
+报告接口支持用户、IP 和全站三级限额，相关变量包括：
+
+- `REPORT_USER_DAILY_LIMIT`
+- `REPORT_CREATE_RATE_LIMIT_PER_HOUR`
+- `REPORT_CREATE_RATE_LIMIT_PER_DAY`
+- `REPORT_GLOBAL_DAILY_LIMIT`
+
+限额设为 `0` 时关闭对应限制。
+
+## API
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/health` | 健康检查 |
+| `GET` | `/config` | 查看当前 LLM、搜索和调试模式，不返回 API Key |
+| `GET` | `/symbol/lookup` | 根据公司名或代码查询候选证券 |
+| `GET` | `/market/chart` | 获取行情和 provider 降级信息 |
+| `GET` | `/financials/latest` | 获取最新 SEC 财务摘要 |
+| `POST` | `/analyze` | 返回完整 Agent 输出、上下文、引用和执行轨迹 |
+| `POST` | `/report` | 返回适合前端展示的精简报告 |
+| `POST` | `/report/tasks` | 创建后台报告任务 |
+| `GET` | `/report/tasks/{task_id}` | 查询后台任务状态 |
+| `GET` | `/memory/history` | 查询研究历史 |
+| `GET/POST` | `/memory/watchlist` | 查询或新增关注标的 |
+
+生成报告示例：
 
 ```bash
 curl -X POST http://127.0.0.1:8000/report \
   -H "Content-Type: application/json" \
-  -d '{"company_name":"Tesla"}'
+  -d '{
+    "company_name": "Tesla",
+    "symbol": "NASDAQ:TSLA",
+    "yahoo_symbol": "TSLA",
+    "exchange": "NASDAQ",
+    "data_provider": "auto"
+  }'
 ```
 
-`/report` 内部复用完整分析流程，但不会返回完整 `team_results`，避免 JSON 过长。返回内容包含：
-
-```text
-company_name
-thread_id
-status
-final_report
-markdown_report
-citation_check
-trace_summary
-```
-
-长期 Memory 接口，使用本地 JSON 文件保存历史投研报告和关注列表：
+异步任务示例：
 
 ```bash
-curl http://127.0.0.1:8000/memory/history
-```
-
-```bash
-curl http://127.0.0.1:8000/memory/history/Tesla
-```
-
-```bash
-curl -X POST http://127.0.0.1:8000/memory/watchlist \
+curl -X POST http://127.0.0.1:8000/report/tasks \
   -H "Content-Type: application/json" \
-  -d '{"company_name":"Tesla"}'
+  -d '{"company_name":"Tesla","symbol":"NASDAQ:TSLA","data_provider":"auto"}'
+
+curl http://127.0.0.1:8000/report/tasks/{task_id}
+```
+
+## 可靠性设计
+
+- `AnalysisContextPack` 为行情、财务和 RAG 数据提供统一状态，包括 `available`、`fallback`、`partial`、`missing`、`not_supported` 和 `fetch_failed`。
+- 外部 provider 请求使用 TTL 缓存、超时和基础限流；行情结果记录每次 provider 尝试。
+- Agent 调用失败时由安全执行层捕获，避免单个节点直接终止整条研究流程。
+- 引用检查器统计 claim-level coverage、有效链接、官方来源和检索分数。
+- 调试接口由 `ENABLE_DEBUG_ROUTES` 控制，生产环境应关闭。
+
+## 项目结构
+
+```text
+app/
+  agents/          # 分析角色、委员会、风控与报告编辑
+  llm/             # OpenAI 兼容 LLM 客户端
+  memory/          # SQLite 研究历史与 Watchlist
+  rag/             # 文档加载、向量存储与检索
+  services/        # 上下文、缓存、财务、日志和限流
+  tools/           # 行情、证券代码、搜索和 SEC 工具
+  graph.py         # LangGraph 工作流
+  main.py          # FastAPI 路由
+frontend/          # React/Vite 前端
+tests/             # API、行情路由和上下文测试
+```
+
+## 测试与构建
+
+```bash
+pytest -q
 ```
 
 ```bash
-curl http://127.0.0.1:8000/memory/watchlist
+cd frontend
+npm run build
 ```
 
-Memory 文件位于：
+## 部署
 
-```text
-data/research_history.json
-data/watchlist.json
-```
+仓库包含 `Dockerfile`、`render.yaml`、`.env.zeabur.example` 和 `frontend/vercel.json`，可用于以下组合：
 
-其中 `/analyze` 完成后会自动写入 `research_history.json`。当前实现是最小本地文件版，不接数据库。
+- FastAPI 后端：Docker、Render、Zeabur 或 Hugging Face Spaces
+- React 前端：Vercel 或其他静态站点平台
+- 持久化目录：`DEEPALPHA_DB_PATH` 与 `CHROMA_DB_PATH`
 
-系统也会在每次分析开始时读取同一家公司最近 3 条历史投研记录，并写入 LangGraph 上下文：
-
-```text
-context["memory"]["recent_history"]
-```
-
-Industry、Fundamental、News、Risk Manager 和 Committee Agent 会参考这些历史结论。重复分析同一家公司时，报告中的“历史投研记忆”章节会展示最近记录；如果没有历史记录，则显示“暂无历史投研记录”。
-
-## 测试
-
-运行自动化测试：
+Docker 本地运行：
 
 ```bash
-pytest
+docker build -t deepalpha .
+docker run --env-file .env -p 8000:8000 deepalpha
 ```
+
+异步报告任务保存在当前进程内。多 worker 或多实例部署时，应将任务状态和分布式限流迁移到 Redis 或数据库。SQLite 适合单实例和演示环境；多租户生产系统应使用独立鉴权和外部数据库。
+
+## 已知限制
+
+- A 股和港股财务披露源尚未接入。
+- 免费行情和搜索 provider 的可用性、频率限制与字段完整度可能变化。
+- mock 模式用于开发与测试，不能作为真实投研依据。
+- 当前访问码和限流机制适合受控演示，不等同于完整用户认证系统。
+- 模型输出可能包含错误，引用覆盖率也不能替代人工核验。
 
 ## 免责声明
 
-本项目仅用于技术学习和信息整理，不构成投资建议。
+DeepAlpha 仅用于技术研究和信息整理。任何输出均不构成投资建议、交易指令、收益承诺或风险保证。使用者应独立核验数据和结论，并自行承担决策风险。

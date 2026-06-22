@@ -22,6 +22,7 @@ def retrieve_industry_context(company_name: str, query: str) -> dict:
                 "url": chunk.get("url", ""),
                 "snippet": chunk.get("content", ""),
                 "chunk_id": chunk.get("chunk_id") or chunk.get("id", ""),
+                "source_provider": chunk.get("source_provider", ""),
                 "source_domain": chunk.get("source_domain", ""),
                 "source_type": chunk.get("source_type", ""),
                 "source_grade": chunk.get("source_grade", ""),

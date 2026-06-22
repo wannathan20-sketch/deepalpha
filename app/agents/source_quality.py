@@ -6,7 +6,7 @@ from app.agents.llm_helpers import build_claims, build_data_quality
 GRADE_RULES = {
     "A": ("sec.gov", "hkexnews.hk", "hkex.com.hk", "annualreports.com"),
     "B": ("reuters.com", "bloomberg.com", "wsj.com", "ft.com", "marketwatch.com", "finance.yahoo.com"),
-    "C": ("wikipedia.org", "google.com", "bing.com"),
+    "C": ("wikipedia.org", "google.com", "bing.com", "theblockbeats.info"),
 }
 
 

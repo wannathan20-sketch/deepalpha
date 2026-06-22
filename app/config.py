@@ -47,7 +47,10 @@ def get_runtime_config() -> dict:
     openai_model = os.getenv("OPENAI_MODEL", "gpt-5")
     deepseek_api_key = os.getenv("DEEPSEEK_API_KEY", "")
     search_provider = os.getenv("SEARCH_PROVIDER", "mock").lower()
+    search_providers = os.getenv("SEARCH_PROVIDERS", "")
     tavily_api_key = os.getenv("TAVILY_API_KEY", "")
+    brave_search_api_key = os.getenv("BRAVE_SEARCH_API_KEY", "")
+    blockbeats_api_key = os.getenv("BLOCKBEATS_API_KEY", "")
     rag_embedding_provider = os.getenv("RAG_EMBEDDING_PROVIDER", "hash").lower()
     llm_model = "deepseek-chat" if llm_provider == "deepseek" else openai_model
     llm_enabled = (
@@ -60,7 +63,16 @@ def get_runtime_config() -> dict:
         "llm_model": llm_model,
         "llm_enabled": llm_enabled,
         "search_provider": search_provider,
-        "search_enabled": search_provider == "tavily" and bool(tavily_api_key),
+        "search_providers": search_providers,
+        "search_enabled": (
+            (search_provider == "tavily" and bool(tavily_api_key))
+            or (search_provider == "brave" and bool(brave_search_api_key))
+            or (search_provider == "blockbeats" and bool(blockbeats_api_key))
+            or search_provider == "multi"
+        ),
+        "tavily_enabled": bool(tavily_api_key),
+        "brave_search_enabled": bool(brave_search_api_key),
+        "blockbeats_enabled": bool(blockbeats_api_key),
         "rag_embedding_provider": rag_embedding_provider,
         "rag_full_text_fetch_enabled": _env_bool("RAG_FETCH_FULL_TEXT", False),
         "rag_chunk_size": get_int_env("RAG_CHUNK_SIZE", 900),

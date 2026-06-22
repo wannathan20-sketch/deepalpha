@@ -98,6 +98,130 @@ def test_debug_routes_can_be_disabled(monkeypatch) -> None:
     assert response.status_code == 404
 
 
+class FakeSearchResponse:
+    def __init__(self, payload: dict | None = None, text: str = "", status_code: int = 200) -> None:
+        self._payload = payload or {}
+        self.text = text
+        self.status_code = status_code
+        self.headers = {"content-type": "text/html"}
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def json(self) -> dict:
+        return self._payload
+
+
+def test_brave_search_provider(monkeypatch) -> None:
+    from app.tools.search import search_public_info
+
+    def fake_get(url, headers=None, params=None, timeout=10):
+        assert url == "https://api.search.brave.com/res/v1/web/search"
+        assert headers["X-Subscription-Token"] == "brave-key"
+        assert params["q"] == "Tesla AI"
+        return FakeSearchResponse(
+            {
+                "web": {
+                    "results": [
+                        {
+                            "title": "Tesla AI update",
+                            "url": "https://example.com/tesla-ai",
+                            "description": "Tesla AI search result",
+                            "extra_snippets": ["extra context"],
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setenv("SEARCH_PROVIDER", "brave")
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "brave-key")
+    monkeypatch.setattr("app.tools.search.requests.get", fake_get)
+
+    results = search_public_info("Tesla AI")
+
+    assert results[0]["provider"] == "brave"
+    assert results[0]["title"] == "Tesla AI update"
+    assert "extra context" in results[0]["snippet"]
+
+
+def test_blockbeats_search_provider(monkeypatch) -> None:
+    from app.tools.search import search_public_info
+
+    def fake_get(url, headers=None, params=None, timeout=10):
+        assert url == "https://api-pro.theblockbeats.info/v1/search"
+        assert headers["api-key"] == "blockbeats-key"
+        assert params["name"] == "BTC ETF"
+        return FakeSearchResponse(
+            {
+                "status": 0,
+                "data": {
+                    "data": [
+                        {
+                            "title": "BTC ETF flow update",
+                            "url": "https://www.theblockbeats.info/news/test",
+                            "content": "<p>BlockBeats 消息，BTC ETF 净流入。</p>",
+                            "create_time": "2026-06-15 10:00:00",
+                        }
+                    ]
+                },
+            }
+        )
+
+    monkeypatch.setenv("SEARCH_PROVIDER", "blockbeats")
+    monkeypatch.setenv("BLOCKBEATS_API_KEY", "blockbeats-key")
+    monkeypatch.setattr("app.tools.search.requests.get", fake_get)
+
+    results = search_public_info("BTC ETF")
+
+    assert results[0]["provider"] == "blockbeats"
+    assert results[0]["published_at"] == "2026-06-15 10:00:00"
+    assert "BTC ETF" in results[0]["snippet"]
+
+
+def test_multi_search_provider_merges_results(monkeypatch) -> None:
+    from app.tools.search import search_public_info
+
+    monkeypatch.setenv("SEARCH_PROVIDER", "multi")
+    monkeypatch.setenv("SEARCH_PROVIDERS", "brave,blockbeats,tavily")
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "brave-key")
+    monkeypatch.setenv("BLOCKBEATS_API_KEY", "blockbeats-key")
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-key")
+    monkeypatch.setenv("SEARCH_MAX_WORKERS", "3")
+    monkeypatch.setattr(
+        "app.tools.search._search_with_brave",
+        lambda query, api_key, limit: [
+            {"title": "Brave result", "url": "https://example.com/brave", "snippet": "brave", "provider": "brave"}
+        ],
+    )
+    monkeypatch.setattr(
+        "app.tools.search._search_with_blockbeats",
+        lambda query, api_key, limit: [
+            {"title": "BlockBeats result", "url": "https://www.theblockbeats.info/news/test", "snippet": "blockbeats", "provider": "blockbeats"}
+        ],
+    )
+    monkeypatch.setattr(
+        "app.tools.search._search_with_tavily",
+        lambda query, api_key, limit: [
+            {"title": "Tavily result", "url": "https://example.com/tavily", "snippet": "tavily", "provider": "tavily"}
+        ],
+    )
+
+    results = search_public_info("BTC ETF", limit=5)
+
+    assert [result["provider"] for result in results] == ["brave", "blockbeats", "tavily"]
+
+
+def test_multi_search_default_providers(monkeypatch) -> None:
+    from app.tools.search import _configured_providers
+
+    monkeypatch.setenv("SEARCH_PROVIDER", "multi")
+    monkeypatch.delenv("SEARCH_PROVIDERS", raising=False)
+
+    assert _configured_providers() == ["brave", "blockbeats", "tavily"]
+
+
 def test_symbol_lookup_empty_query() -> None:
     response = client.get("/symbol/lookup", params={"query": "   "})
     data = response.json()

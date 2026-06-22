@@ -51,7 +51,9 @@ def _domain(url: str) -> str:
     return parsed.netloc.lower().removeprefix("www.")
 
 
-def _source_type(url: str) -> str:
+def _source_type(url: str, provider: str = "") -> str:
+    if provider == "blockbeats":
+        return "vertical_crypto_media"
     domain = _domain(url)
     if domain.endswith("sec.gov"):
         return "regulatory_filing"
@@ -124,6 +126,7 @@ def load_company_industry_docs(company_name: str) -> list[dict]:
     for index, result in enumerate(search_results):
         url = result.get("url", "")
         snippet = result.get("snippet", "")
+        provider = result.get("provider", "")
         full_text = ""
         if os.getenv("RAG_FETCH_FULL_TEXT", "false").strip().lower() in {"1", "true", "yes", "on"}:
             full_text = _fetch_url_text(url)
@@ -147,8 +150,9 @@ def load_company_industry_docs(company_name: str) -> list[dict]:
                     "content": chunk,
                     "snippet": chunk[:280],
                     "source": result,
+                    "source_provider": provider,
                     "source_domain": _domain(url),
-                    "source_type": _source_type(url),
+                    "source_type": _source_type(url, provider),
                     "retrieved_at": retrieved_at,
                     "published_at": result.get("published_at", ""),
                     "chunk_index": chunk_index,

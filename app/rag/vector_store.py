@@ -11,6 +11,7 @@ EMBEDDING_DIMENSION = 128
 CHROMA_PATH = Path(os.getenv("CHROMA_DB_PATH", "data/chroma"))
 OFFICIAL_SOURCE_DOMAINS = ("sec.gov", "hkexnews.hk", "hkex.com.hk", "annualreports.com")
 MARKET_SOURCE_DOMAINS = ("reuters.com", "bloomberg.com", "wsj.com", "ft.com", "marketwatch.com", "finance.yahoo.com")
+VERTICAL_MEDIA_DOMAINS = ("theblockbeats.info",)
 
 
 def _tokenize(text: str) -> list[str]:
@@ -45,6 +46,8 @@ def _source_quality_score(document: dict) -> float:
         return 1.0
     if any(domain.endswith(rule) for rule in MARKET_SOURCE_DOMAINS):
         return 0.82
+    if any(domain.endswith(rule) for rule in VERTICAL_MEDIA_DOMAINS) or document.get("source_type") == "vertical_crypto_media":
+        return 0.68
     if domain and domain != "example.com":
         return 0.58
     if domain == "example.com":
@@ -218,6 +221,7 @@ class ChromaVectorStore:
                     "title": document.get("title", ""),
                     "url": document.get("url", ""),
                     "source_domain": document.get("source_domain", ""),
+                    "source_provider": document.get("source_provider", ""),
                     "source_type": document.get("source_type", ""),
                     "retrieved_at": document.get("retrieved_at", ""),
                     "published_at": document.get("published_at", ""),
