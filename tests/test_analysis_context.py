@@ -135,3 +135,29 @@ def test_financial_profile_distinguishes_missing_and_unsupported() -> None:
 
     assert missing["context_status"] == "missing"
     assert unsupported["context_status"] == "not_supported"
+
+
+def test_rag_node_adds_analysis_context(monkeypatch) -> None:
+    from app.graph import rag_node
+
+    monkeypatch.setattr(
+        "app.graph.retrieve_industry_context",
+        lambda company, query: {
+            "vector_store": "in_memory",
+            "chunks": [{"content": "mock", "source_type": "mock", "source_provider": "mock"}],
+        },
+    )
+    state = {
+        "company_name": "ContextCo",
+        "market_profile": {"enabled": True, "context_status": "available", "latest_close": 10},
+        "financial_profile": {"enabled": False, "context_status": "missing"},
+        "analysis_context": {},
+        "context": {},
+        "trace": {"steps": []},
+    }
+
+    result = rag_node(state)
+
+    assert result["analysis_context"]["version"] == "1.0"
+    assert result["analysis_context"]["rag"]["status"] == "fallback"
+    assert result["context"]["analysis_context"] == result["analysis_context"]

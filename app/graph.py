@@ -24,6 +24,7 @@ from app.agents import (
 from app.memory.store import get_research_history
 from app.rag.retriever import retrieve_industry_context
 from app.report_generator import generate_markdown_report
+from app.services.analysis_context import build_analysis_context
 from app.services.citation_checker import check_citations
 from app.trace import add_trace_step, finish_trace, start_trace
 from app.utils import safe_run_agent
@@ -41,6 +42,7 @@ class DeepAlphaState(TypedDict):
     context: dict
     rag_chunks: list[dict]
     rag_context: dict
+    analysis_context: dict
     team_results: dict
     final_report: dict
     markdown_report: str
@@ -159,8 +161,15 @@ def rag_node(state: DeepAlphaState) -> DeepAlphaState:
     rag_chunks = rag_context.get("chunks", [])
     context = state["context"]
     trace = state["trace"]
+    analysis_context = build_analysis_context(
+        state["company_name"],
+        market_profile=state.get("market_profile", {}),
+        financial_profile=state.get("financial_profile", {}),
+        rag_context=rag_context,
+    ).model_dump(mode="json")
 
     context["rag"] = rag_context
+    context["analysis_context"] = analysis_context
     add_trace_step(
         trace,
         "rag_retriever_completed",
@@ -173,6 +182,7 @@ def rag_node(state: DeepAlphaState) -> DeepAlphaState:
         "context": context,
         "rag_chunks": rag_chunks,
         "rag_context": rag_context,
+        "analysis_context": analysis_context,
         "trace": trace,
     }
 
@@ -391,6 +401,7 @@ def run_deepalpha_graph(
         "context": {},
         "rag_chunks": [],
         "rag_context": {},
+        "analysis_context": {},
         "team_results": {},
         "final_report": {},
         "markdown_report": "",
@@ -418,6 +429,7 @@ def run_deepalpha_graph(
         "report_editor": final_state["report_editor_result"],
         "market_profile": final_state.get("market_profile", {}),
         "financial_profile": final_state.get("financial_profile", {}),
+        "analysis_context": final_state.get("analysis_context", {}),
         "citation_check": final_state["citation_check"],
         "trace": final_state["trace"],
     }
