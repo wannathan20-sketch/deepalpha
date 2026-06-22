@@ -24,7 +24,7 @@ Automatic routing uses a short provider chain inspired by
 
 | Market | Automatic provider order | Availability |
 | --- | --- | --- |
-| A-share | Efinance, AkShare, Baostock, Yahoo | First three are local Python adapters; Yahoo is the final delayed-data fallback |
+| A-share | AkShare, Efinance, Baostock, Yahoo | AkShare is the Python 3.13-compatible core source; Efinance and Baostock are optional; Yahoo is the final delayed-data fallback |
 | Hong Kong | Yahoo, AkShare | Both work without a paid account |
 | US | Yahoo, Finnhub | Finnhub is skipped unless `FINNHUB_API_KEY` is configured |
 
@@ -32,10 +32,12 @@ Yahoo remains first for Hong Kong and US stocks to preserve current behavior.
 SEC Companyfacts remains the US financial source and is not changed by this
 phase.
 
-Efinance, AkShare, and Baostock are added to the project's pinned runtime
-dependencies because A-share support is a core target. They are still loaded
-lazily: a broken or unavailable installation is recorded as an unavailable
-attempt instead of preventing application startup.
+AkShare is added to the project's pinned runtime dependencies because it
+explicitly supports Python 3.13 and A-share support is a core target. Efinance
+and Baostock remain optional enhancements because their published Python
+compatibility metadata does not cover the project's Python 3.13 runtime. All
+three are loaded lazily: a missing or broken installation is recorded as an
+unavailable attempt instead of preventing application startup.
 
 ## Architecture
 
