@@ -269,18 +269,29 @@ def build_financial_profile(symbol: str | None, exchange: str | None = None) -> 
     """
     ticker = normalize_us_ticker(symbol, exchange)
     if not ticker:
+        has_symbol = bool(str(symbol or "").strip())
         return {
             "enabled": False,
+            "context_status": "not_supported" if has_symbol else "missing",
             "symbol": symbol,
             "source": "sec_companyfacts",
-            "reason": "SEC companyfacts MVP currently supports US-listed tickers only.",
-            "summary": ["当前仅支持美股 SEC companyfacts，港股/A 股需后续接 HKEX/交易所数据源。"],
+            "reason": (
+                "SEC companyfacts MVP currently supports US-listed tickers only."
+                if has_symbol
+                else "No financial symbol provided."
+            ),
+            "summary": [
+                "当前仅支持美股 SEC companyfacts，港股/A 股需后续接 HKEX/交易所数据源。"
+                if has_symbol
+                else "未提供可用于财报查询的股票代码。"
+            ],
         }
 
     cik_match = ticker_to_cik(ticker)
     if not cik_match.get("matched"):
         return {
             "enabled": False,
+            "context_status": "missing",
             "symbol": ticker,
             "source": "sec_companyfacts",
             "reason": cik_match.get("reason", "Ticker CIK lookup failed."),
@@ -324,6 +335,7 @@ def build_financial_profile(symbol: str | None, exchange: str | None = None) -> 
 
     profile = {
         "enabled": True,
+        "context_status": "partial" if filing_metadata.get("metadata_error") else "available",
         "symbol": ticker,
         "cik": cik,
         "company_name": cik_match.get("company_name", ""),

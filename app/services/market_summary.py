@@ -21,15 +21,18 @@ def build_market_profile(
     if not resolved_symbol:
         return {
             "enabled": False,
+            "context_status": "missing",
             "reason": "No market symbol provided.",
         }
 
     chart = get_market_chart(resolved_symbol, provider_name, "6mo", "1d")
     points = chart.get("points", [])
     if len(points) < 2:
+        fetch_error = str(chart.get("error") or "").strip()
         return {
             "enabled": False,
-            "reason": "Insufficient market data.",
+            "context_status": "fetch_failed" if fetch_error else "missing",
+            "reason": fetch_error or "Insufficient market data.",
             "symbol": resolved_symbol,
             "provider": chart.get("provider", provider_name),
             "exchange": exchange or chart.get("exchange", ""),
@@ -54,6 +57,7 @@ def build_market_profile(
 
     return {
         "enabled": True,
+        "context_status": "available",
         "symbol": symbol,
         "yahoo_symbol": resolved_symbol,
         "provider": chart.get("provider", provider_name),

@@ -110,3 +110,28 @@ def test_degraded_inputs_reduce_quality_score() -> None:
     assert degraded.data_quality.overall_score < available.data_quality.overall_score
     assert degraded.data_quality.level == "poor"
     assert len(degraded.data_quality.limitations) == 3
+
+
+def test_market_profile_marks_provider_error_as_fetch_failed(monkeypatch) -> None:
+    from app.services.market_summary import build_market_profile
+
+    monkeypatch.setattr(
+        "app.services.market_summary.get_market_chart",
+        lambda *args, **kwargs: {"provider": "auto", "points": [], "error": "timeout"},
+    )
+
+    profile = build_market_profile(symbol="NASDAQ:NVDA", yahoo_symbol="NVDA")
+
+    assert profile["enabled"] is False
+    assert profile["context_status"] == "fetch_failed"
+    assert profile["reason"] == "timeout"
+
+
+def test_financial_profile_distinguishes_missing_and_unsupported() -> None:
+    from app.services.financials import build_financial_profile
+
+    missing = build_financial_profile(None)
+    unsupported = build_financial_profile("0700.HK", "HKEX")
+
+    assert missing["context_status"] == "missing"
+    assert unsupported["context_status"] == "not_supported"

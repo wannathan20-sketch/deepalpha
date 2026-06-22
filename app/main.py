@@ -298,6 +298,8 @@ def _build_market_profile_from_request(request: AnalyzeRequest) -> dict:
     except Exception as exc:
         return {
             "enabled": False,
+            "context_status": "fetch_failed",
+            "fetch_failed": True,
             "reason": str(exc),
             "symbol": request.symbol,
             "yahoo_symbol": request.yahoo_symbol,
@@ -312,6 +314,8 @@ def _build_financial_profile_from_request(request: AnalyzeRequest) -> dict:
     except Exception as exc:
         return {
             "enabled": False,
+            "context_status": "fetch_failed",
+            "fetch_failed": True,
             "reason": str(exc),
             "symbol": symbol,
             "source": "sec_companyfacts",
