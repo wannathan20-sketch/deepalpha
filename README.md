@@ -105,12 +105,6 @@ npm run dev
 VITE_API_BASE=https://api.example.com
 ```
 
-仓库还保留了一个简化的 Streamlit 入口：
-
-```bash
-streamlit run frontend.py
-```
-
 ## 配置
 
 完整配置及默认值见 [`.env.example`](.env.example)。以下是常用选项。

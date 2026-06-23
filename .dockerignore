@@ -1,5 +1,8 @@
 .DS_Store
 .env
+PROJECT_STATE.md
+docs/superpowers/
+frontend.py
 .pytest_cache/
 __pycache__/
 *.pyc
