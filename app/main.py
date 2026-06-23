@@ -31,6 +31,7 @@ from app.schemas import (
     ReportTaskStatusResponse,
     ReportResponse,
     RuntimeConfigResponse,
+    SymbolResolveBatchRequest,
     WatchlistRequest,
 )
 from app.services.cache import cache
@@ -230,6 +231,87 @@ def symbol_lookup(query: str, request: Request) -> dict:
             "error": str(exc),
             "source": "external_provider",
         }
+
+
+def _split_symbol_batch_text(text: str | None) -> list[str]:
+    if not text:
+        return []
+    values = []
+    for item in text.replace("，", ",").replace("；", ",").replace(";", ",").replace("\n", ",").split(","):
+        clean = item.strip()
+        if clean:
+            values.append(clean)
+    return values
+
+
+def _symbol_batch_items(payload: SymbolResolveBatchRequest) -> list[str]:
+    seen = set()
+    items = []
+    for item in [*payload.items, *_split_symbol_batch_text(payload.text)]:
+        clean = str(item or "").strip()
+        if not clean:
+            continue
+        key = clean.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(clean)
+    return items[:100]
+
+
+def _resolve_symbol_item(item: str) -> dict:
+    try:
+        resolved = lookup_symbol(item)
+    except Exception as exc:
+        return {
+            "input": item,
+            "resolved": None,
+            "candidates": [],
+            "needs_confirmation": True,
+            "error": str(exc),
+        }
+
+    candidates = resolved.get("candidates") or resolved.get("matches") or []
+    best = candidates[0] if candidates else None
+    needs_confirmation = bool(resolved.get("needs_confirmation", True))
+    auto_resolved = (
+        best
+        if resolved.get("matched")
+        and not needs_confirmation
+        and len(candidates) == 1
+        and (best.get("confidence") or 0) >= 0.9
+        else None
+    )
+    error = str(resolved.get("error") or "").strip()
+    if not auto_resolved and not candidates and not error:
+        error = "No symbol match found."
+
+    return {
+        "input": item,
+        "resolved": auto_resolved,
+        "candidates": candidates,
+        "needs_confirmation": needs_confirmation or auto_resolved is None,
+        "error": error or None,
+    }
+
+
+@app.post("/symbol/resolve-batch")
+def symbol_resolve_batch(payload: SymbolResolveBatchRequest, request: Request) -> dict:
+    rate_limit(
+        request,
+        "symbol_resolve_batch",
+        limit=get_int_env("SYMBOL_LOOKUP_RATE_LIMIT", 60),
+        window_seconds=60,
+    )
+    items = _symbol_batch_items(payload)
+    results = [_resolve_symbol_item(item) for item in items]
+    return {
+        "total": len(results),
+        "resolved_count": sum(1 for item in results if item.get("resolved")),
+        "needs_confirmation_count": sum(1 for item in results if not item.get("resolved") and item.get("candidates")),
+        "failed_count": sum(1 for item in results if item.get("error") and not item.get("candidates")),
+        "results": results,
+    }
 
 
 @app.get("/market/chart")

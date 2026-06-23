@@ -15,7 +15,7 @@ DeepAlpha 是一个面向 A 股、港股和美股的多智能体投研系统。�
 - 数据质量层：用 `AnalysisContextPack` 标记 `available`、`fallback`、`partial`、`missing`、`not_supported`、`fetch_failed` 等状态。
 - 报告可靠性：引用覆盖检查、来源质量评估、Agent trace、Markdown 报告编辑和风险提示。
 - 生产约束：`APP_ENV=production` 下禁止 mock LLM 和 mock 搜索；LLM 失败返回明确错误，搜索失败记录为缺失数据。
-- 前端工作台：React/Vite 三栏界面，支持公司搜索、候选证券、K 线图、报告生成、历史记录和 Watchlist。
+- 前端工作台：React/Vite 三栏界面，支持公司搜索、候选证券、K 线图、报告生成、历史记录、Watchlist 和 Watchlist 智能导入。
 
 ## 适用场景
 
@@ -127,6 +127,24 @@ npm run dev
 ```env
 VITE_API_BASE=https://api.example.com
 ```
+
+### Watchlist 智能导入
+
+前端 Watchlist 支持直接粘贴多行或逗号分隔股票代码/名称，例如：
+
+```text
+600519, 0700.HK, NVDA, 智谱AI, 京东
+```
+
+也支持最小 CSV 文本，只要包含 `symbol`、`name` 或 `company` 其中一列即可：
+
+```csv
+symbol
+PLTR
+中芯国际
+```
+
+导入会调用 `POST /symbol/resolve-batch`。高置信唯一结果会自动加入 Watchlist；多候选结果会在前端等待用户确认；失败项会显示错误，不会静默丢弃。
 
 ## 环境变量
 

@@ -76,6 +76,11 @@ class WatchlistRequest(BaseModel):
     data_provider: str | None = None
 
 
+class SymbolResolveBatchRequest(BaseModel):
+    items: list[str] = Field(default_factory=list)
+    text: str | None = None
+
+
 class AnalyzeResponse(BaseModel):
     """Full graph response used by the interactive analysis endpoint.
     交互式分析接口返回的完整图执行结果。

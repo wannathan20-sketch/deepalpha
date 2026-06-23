@@ -328,6 +328,66 @@ def test_symbol_lookup_zhipu_ai_hk_listing() -> None:
     assert data["matches"][0]["source"] == "alias"
 
 
+def test_symbol_resolve_batch_handles_success_ambiguity_and_failure(monkeypatch) -> None:
+    def fake_lookup(query: str) -> dict:
+        if query == "bad":
+            raise RuntimeError("lookup exploded")
+        if query == "京东":
+            return {
+                "query": query,
+                "matched": True,
+                "needs_confirmation": True,
+                "candidates": [
+                    {"symbol": "9618.HK", "name": "JD.com", "confidence": 0.95},
+                    {"symbol": "JD", "name": "JD.com", "confidence": 0.94},
+                ],
+            }
+        return {
+            "query": query,
+            "matched": True,
+            "needs_confirmation": False,
+            "candidates": [{"symbol": "NVDA", "name": "NVIDIA", "confidence": 0.99}],
+        }
+
+    monkeypatch.setattr("app.main.lookup_symbol", fake_lookup)
+
+    response = client.post("/symbol/resolve-batch", json={"items": ["NVDA", "京东", "bad", "   "]})
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["total"] == 3
+    assert data["resolved_count"] == 1
+    assert data["needs_confirmation_count"] == 1
+    assert data["failed_count"] == 1
+    assert data["results"][0]["input"] == "NVDA"
+    assert data["results"][0]["resolved"]["symbol"] == "NVDA"
+    assert data["results"][1]["needs_confirmation"] is True
+    assert len(data["results"][1]["candidates"]) == 2
+    assert data["results"][2]["input"] == "bad"
+    assert data["results"][2]["resolved"] is None
+    assert data["results"][2]["error"] == "lookup exploded"
+
+
+def test_symbol_resolve_batch_accepts_text_payload(monkeypatch) -> None:
+    captured = []
+
+    def fake_lookup(query: str) -> dict:
+        captured.append(query)
+        return {
+            "query": query,
+            "matched": True,
+            "needs_confirmation": False,
+            "candidates": [{"symbol": query, "name": query, "confidence": 0.99}],
+        }
+
+    monkeypatch.setattr("app.main.lookup_symbol", fake_lookup)
+
+    response = client.post("/symbol/resolve-batch", json={"text": "600519, 0700.HK\nNVDA"})
+
+    assert response.status_code == 200
+    assert captured == ["600519", "0700.HK", "NVDA"]
+
+
 def test_market_chart_empty_symbol() -> None:
     for provider in ("auto", "yahoo"):
         response = client.get("/market/chart", params={"symbol": "   ", "provider": provider})

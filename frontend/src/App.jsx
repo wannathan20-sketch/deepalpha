@@ -22,7 +22,7 @@ import {
   TrendingUp,
   Wrench,
 } from "lucide-react";
-import { loadStockIndex, mergeSymbolCandidates, searchStockIndex } from "./stockSearch.js";
+import { loadStockIndex, mergeSymbolCandidates, parseWatchlistImportText, searchStockIndex } from "./stockSearch.js";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 const DISCLAIMER_STORAGE_KEY = "deepalpha_disclaimer_accepted";
@@ -1138,6 +1138,8 @@ export default function App() {
   const [companyName, setCompanyName] = useState("Tesla");
   const [ticker, setTicker] = useState("NASDAQ:TSLA");
   const [watchlistCompany, setWatchlistCompany] = useState("");
+  const [watchlistImportText, setWatchlistImportText] = useState("");
+  const [watchlistImportResults, setWatchlistImportResults] = useState(null);
   const [runtimeConfig, setRuntimeConfig] = useState(null);
   const [architecture, setArchitecture] = useState(null);
   const [watchlist, setWatchlist] = useState([]);
@@ -1429,6 +1431,74 @@ export default function App() {
     }
   }
 
+  function watchlistPayloadFromCandidate(candidate) {
+    return {
+      company_name: candidate.name || candidate.company || candidate.symbol,
+      symbol: candidate.ticker || candidate.symbol,
+      yahoo_symbol: candidate.raw_symbol || candidate.symbol,
+      data_provider: backendMarketProvider,
+    };
+  }
+
+  async function addWatchlistCandidate(candidate) {
+    await requestJson("/memory/watchlist", {
+      method: "POST",
+      body: JSON.stringify(watchlistPayloadFromCandidate(candidate)),
+    });
+  }
+
+  async function importWatchlistItems() {
+    const items = parseWatchlistImportText(watchlistImportText);
+    if (!items.length) {
+      setError("请粘贴股票代码、名称或包含 symbol/name/company 的 CSV。");
+      return;
+    }
+
+    setLoading("watchlist-import");
+    setError("");
+    try {
+      const resolved = await requestJson("/symbol/resolve-batch", {
+        method: "POST",
+        body: JSON.stringify({ items }),
+      });
+      const autoItems = resolved.results.filter((item) => item.resolved);
+      for (const item of autoItems) {
+        await addWatchlistCandidate(item.resolved);
+      }
+      setWatchlistImportResults(resolved);
+      await loadDashboardData(companyName);
+    } catch (err) {
+      setError("导入 Watchlist 失败，请确认后端已启动。");
+    } finally {
+      setLoading("");
+    }
+  }
+
+  async function confirmWatchlistImportCandidate(candidate) {
+    setLoading("watchlist-import");
+    setError("");
+    try {
+      await addWatchlistCandidate(candidate);
+      setWatchlistImportResults((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          results: current.results.map((item) => {
+            const symbols = (item.candidates || []).map((entry) => entry.symbol);
+            return symbols.includes(candidate.symbol)
+              ? { ...item, resolved: candidate, candidates: [], needs_confirmation: false, error: null }
+              : item;
+          }),
+        };
+      });
+      await loadDashboardData(companyName);
+    } catch (err) {
+      setError("添加候选股票失败，请稍后重试。");
+    } finally {
+      setLoading("");
+    }
+  }
+
   const selectedHistory = history[selectedHistoryIndex];
   const matchedSymbol = remoteSymbol;
   const needsConfirmation = Boolean(symbolCandidates.length > 1 && !matchedSymbol);
@@ -1561,6 +1631,59 @@ export default function App() {
               >
                 {loading === "watchlist" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               </button>
+            </div>
+            <div className="mb-3 rounded-md border border-slate-800 bg-slate-950/70 p-3">
+              <textarea
+                className="min-h-20 w-full resize-y rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400"
+                onChange={(event) => setWatchlistImportText(event.target.value)}
+                placeholder="粘贴多行或逗号分隔股票：600519, 0700.HK, NVDA, 智谱AI, 京东"
+                value={watchlistImportText}
+              />
+              <button
+                className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-md border border-cyan-300/40 px-3 py-2 text-sm text-cyan-100 hover:border-cyan-300 disabled:opacity-50"
+                disabled={Boolean(loading)}
+                onClick={importWatchlistItems}
+                type="button"
+              >
+                {loading === "watchlist-import" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                智能导入
+              </button>
+              {watchlistImportResults && (
+                <div className="mt-3 space-y-3 text-xs">
+                  <div className="flex flex-wrap gap-2 text-slate-500">
+                    <span>自动加入：{watchlistImportResults.resolved_count}</span>
+                    <span>待确认：{watchlistImportResults.needs_confirmation_count}</span>
+                    <span>失败：{watchlistImportResults.failed_count}</span>
+                  </div>
+                  {watchlistImportResults.results
+                    .filter((item) => !item.resolved && item.candidates?.length)
+                    .map((item) => (
+                      <div className="rounded-md border border-amber-400/20 bg-amber-400/10 p-2" key={item.input}>
+                        <div className="mb-2 text-amber-100">{item.input} 需要确认</div>
+                        <div className="flex flex-wrap gap-2">
+                          {item.candidates.slice(0, 3).map((candidate) => (
+                            <button
+                              className="rounded-md border border-slate-700 px-2 py-1 text-slate-200 hover:border-cyan-400 hover:text-cyan-100"
+                              disabled={Boolean(loading)}
+                              key={`${item.input}-${candidate.symbol}`}
+                              onClick={() => confirmWatchlistImportCandidate(candidate)}
+                              type="button"
+                            >
+                              {candidate.name || candidate.company || candidate.symbol} · {candidate.symbol}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  {watchlistImportResults.results
+                    .filter((item) => item.error && !item.candidates?.length)
+                    .map((item) => (
+                      <div className="rounded-md border border-red-400/20 bg-red-400/10 p-2 text-red-100" key={item.input}>
+                        {item.input}：{item.error}
+                      </div>
+                    ))}
+                </div>
+              )}
             </div>
             {watchlist.length ? (
               <div className="space-y-2">

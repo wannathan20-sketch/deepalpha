@@ -8,6 +8,58 @@ function normalizeSymbol(value) {
   return String(value || "").trim().toUpperCase().replace(":", ".");
 }
 
+function splitCsvLine(line) {
+  const cells = [];
+  let current = "";
+  let quoted = false;
+  for (const char of String(line || "")) {
+    if (char === "\"") {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+export function parseWatchlistImportText(text) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) return [];
+
+  const firstRow = splitCsvLine(lines[0]).map((cell) => normalizeText(cell));
+  const fieldIndex = firstRow.findIndex((cell) => ["symbol", "name", "company"].includes(cell));
+  const values = [];
+
+  if (fieldIndex >= 0) {
+    lines.slice(1).forEach((line) => {
+      const cell = splitCsvLine(line)[fieldIndex]?.trim();
+      if (cell) values.push(cell);
+    });
+  } else {
+    lines.forEach((line) => {
+      splitCsvLine(line.replace(/，/g, ",")).forEach((cell) => {
+        const clean = cell.trim();
+        if (clean) values.push(clean);
+      });
+    });
+  }
+
+  const seen = new Set();
+  return values.filter((value) => {
+    const key = normalizeText(value);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function symbolKeys(item) {
   const values = [
     item.symbol,

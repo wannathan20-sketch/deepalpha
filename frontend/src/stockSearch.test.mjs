@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { mergeSymbolCandidates, searchStockIndex } from "./stockSearch.js";
+import { mergeSymbolCandidates, parseWatchlistImportText, searchStockIndex } from "./stockSearch.js";
 
 const publicIndex = JSON.parse(readFileSync(new URL("../public/stocks.index.json", import.meta.url), "utf8"));
 
@@ -127,4 +127,25 @@ test("public index includes Zhipu AI Hong Kong listing", () => {
 
   assert.equal(results[0].symbol, "2513.HK");
   assert.equal(results[0].ticker, "HKEX:2513");
+});
+
+test("parses pasted watchlist symbols and names", () => {
+  const items = parseWatchlistImportText("600519, 0700.HK, NVDA\n智谱AI\n京东");
+
+  assert.deepEqual(items, ["600519", "0700.HK", "NVDA", "智谱AI", "京东"]);
+});
+
+test("parses minimal csv import with symbol or company column", () => {
+  const symbolItems = parseWatchlistImportText("symbol\nPLTR\n中芯国际");
+  const companyItems = parseWatchlistImportText("company\n智谱AI\n京东");
+
+  assert.deepEqual(symbolItems, ["PLTR", "中芯国际"]);
+  assert.deepEqual(companyItems, ["智谱AI", "京东"]);
+});
+
+test("public index resolves import examples", () => {
+  assert.equal(searchStockIndex("智谱AI", publicIndex)[0].symbol, "2513.HK");
+  assert.ok(searchStockIndex("京东", publicIndex).some((item) => item.symbol === "9618.HK"));
+  assert.ok(searchStockIndex("中芯国际", publicIndex).some((item) => item.symbol === "688981.SS"));
+  assert.equal(searchStockIndex("PLTR", publicIndex)[0].symbol, "PLTR");
 });
