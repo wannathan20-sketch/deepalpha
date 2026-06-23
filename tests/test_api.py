@@ -285,6 +285,38 @@ def test_symbol_lookup_exact_symbol() -> None:
     assert data["matches"][0]["source"] == "exact_symbol"
 
 
+def test_symbol_lookup_popular_us_ai_name() -> None:
+    response = client.get("/symbol/lookup", params={"query": "PLTR"})
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["matches"][0]["symbol"] == "PLTR"
+    assert data["matches"][0]["exchange"] == "NASDAQ"
+    assert data["matches"][0]["source"] == "exact_symbol"
+
+
+def test_symbol_lookup_popular_dual_listed_china_name() -> None:
+    response = client.get("/symbol/lookup", params={"query": "京东"})
+    data = response.json()
+    symbols = [match["symbol"] for match in data["matches"]]
+
+    assert response.status_code == 200
+    assert "9618.HK" in symbols
+    assert "JD" in symbols
+    assert data["needs_confirmation"] is True
+
+
+def test_symbol_lookup_popular_cn_semiconductor_name() -> None:
+    response = client.get("/symbol/lookup", params={"query": "中芯国际"})
+    data = response.json()
+    symbols = [match["symbol"] for match in data["matches"]]
+
+    assert response.status_code == 200
+    assert "688981.SS" in symbols
+    assert "0981.HK" in symbols
+    assert data["needs_confirmation"] is True
+
+
 def test_market_chart_empty_symbol() -> None:
     for provider in ("auto", "yahoo"):
         response = client.get("/market/chart", params={"symbol": "   ", "provider": provider})

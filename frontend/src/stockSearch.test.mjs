@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { mergeSymbolCandidates, searchStockIndex } from "./stockSearch.js";
+
+const publicIndex = JSON.parse(readFileSync(new URL("../public/stocks.index.json", import.meta.url), "utf8"));
 
 const index = [
   {
@@ -96,4 +99,25 @@ test("merges remote candidates without duplicating local index matches", () => {
   assert.equal(merged.filter((item) => item.symbol === "9988.HK").length, 1);
   assert.equal(merged[0].symbol, "9988.HK");
   assert.equal(merged[0].source, "alias");
+});
+
+test("public index includes high-attention US AI names", () => {
+  const results = searchStockIndex("pltr", publicIndex);
+
+  assert.equal(results[0].symbol, "PLTR");
+  assert.equal(results[0].source, "local_index_code");
+});
+
+test("public index includes high-attention A-share semiconductor names", () => {
+  const results = searchStockIndex("中芯国际", publicIndex).map((item) => item.symbol);
+
+  assert.ok(results.includes("688981.SS"));
+  assert.ok(results.includes("0981.HK"));
+});
+
+test("public index includes dual-listed Chinese internet names", () => {
+  const results = searchStockIndex("京东", publicIndex).map((item) => item.symbol);
+
+  assert.ok(results.includes("9618.HK"));
+  assert.ok(results.includes("JD"));
 });
