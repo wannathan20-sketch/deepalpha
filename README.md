@@ -8,7 +8,7 @@ DeepAlpha 是一个面向 A 股、港股和美股的多智能体投研系统。�
 
 ## 核心能力
 
-- 多市场支持：A 股、港股、美股的证券识别、行情路由和图表展示。
+- 多市场支持：A 股、港股、美股的证券识别、行情路由、市场复盘和图表展示。
 - 多 Agent 工作流：规划、行业、基本面、财务、估值、技术、新闻、情绪、多空辩论、交易观点、风险审查、来源质量和委员会总结。
 - 多源检索：支持 Brave Search、BlockBeats、Tavily；生产环境搜索失败时标记数据缺失，不用 mock 伪造来源。
 - 财务数据：美股接入 SEC EDGAR companyfacts；A 股和港股接入 AkShare 可用财务摘要与公告接口，按字段稳定性标记数据质量。
@@ -49,7 +49,7 @@ flowchart LR
 | Agent 编排 | LangGraph |
 | LLM | DeepSeek、OpenAI、开发测试 mock |
 | 检索 | Brave Search、BlockBeats、Tavily、Chroma |
-| 行情 | AkShare、Yahoo Finance、Finnhub、Efinance、Baostock |
+| 行情 / 市场复盘 | AkShare、Yahoo Finance、Finnhub、Efinance、Baostock |
 | 财务 | SEC EDGAR companyfacts、AkShare |
 | 存储 | SQLite、Chroma |
 | 前端 | React、Vite、Tailwind CSS、Lucide Icons |
@@ -68,6 +68,18 @@ flowchart LR
 | 美股 | Yahoo -> Finnhub | Finnhub 需要 `FINNHUB_API_KEY` |
 
 显式指定 provider 时不会自动切换到其他来源。
+
+### 市场复盘
+
+`GET /market/review?market=auto|cn|hk|us` 会返回主要指数、涨跌幅、可用量能字段、市场状态、热点/板块占位摘要和数据质量状态。`market=auto` 同时返回 A 股、港股、美股三组复盘。
+
+| 市场 | 指数范围 | 当前边界 |
+| --- | --- | --- |
+| A 股 | 上证指数、深证成指、创业板指、科创50 | 复用行情 provider 链，优先按 A 股 provider 路由；若板块表现或涨跌家数无法稳定获取，会保留为空并在 `context_status` 中标记质量 |
+| 港股 | 恒生指数、恒生科技指数 | 优先 Yahoo 指数行情；失败时保留 `provider_attempts` 和错误摘要 |
+| 美股 | S&P 500、Nasdaq、Dow | 优先 Yahoo 指数行情；Finnhub 可作为个股行情 provider，但复盘指数默认使用 Yahoo |
+
+数据源失败时不会用 mock 代替，接口会返回 `available`、`partial`、`missing`、`fetch_failed` 或 `not_supported`。
 
 ### 财务、新闻与检索
 

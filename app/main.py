@@ -36,6 +36,7 @@ from app.schemas import (
 from app.services.cache import cache
 from app.services.financials import build_financial_profile
 from app.services.logging import log_event
+from app.services.market_review import build_market_review
 from app.services.market_summary import build_market_profile
 from app.services.rate_limit import rate_limit, rate_limiter
 from app.services import report_tasks
@@ -284,6 +285,17 @@ def market_chart(
             "error": str(exc),
             "source": "market_chart",
         }
+
+
+@app.get("/market/review")
+def market_review(market: str = "auto") -> dict:
+    cache_key = f"market-review:{str(market or 'auto').strip().lower()}"
+    data, cache_hit = cache.get_or_set(
+        cache_key,
+        get_int_env("MARKET_REVIEW_CACHE_TTL_SECONDS", 300),
+        lambda: build_market_review(market),
+    )
+    return {**data, "cache_hit": cache_hit}
 
 
 @app.get("/financials/latest")

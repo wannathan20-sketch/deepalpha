@@ -365,6 +365,46 @@ def test_market_chart_rate_limit(monkeypatch) -> None:
     assert second_response.status_code == 429
 
 
+def test_market_review_endpoint(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.main.build_market_review",
+        lambda market="auto": {
+            "market": market,
+            "context_status": "available",
+            "reviews": {
+                "cn": {
+                    "market": "cn",
+                    "context_status": "available",
+                    "market_status": "up",
+                    "indices": [
+                        {
+                            "name": "上证指数",
+                            "symbol": "000001.SH",
+                            "latest_close": 3100,
+                            "change_percent": 1.2,
+                            "volume": 100,
+                            "provider": "akshare",
+                            "provider_attempts": [{"provider": "akshare", "status": "success"}],
+                        }
+                    ],
+                    "hotspots": [],
+                    "summary": ["A 股主要指数偏强。"],
+                    "provider_attempts": [{"provider": "akshare", "status": "success"}],
+                }
+            },
+        },
+        raising=False,
+    )
+
+    response = client.get("/market/review", params={"market": "cn"})
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["market"] == "cn"
+    assert data["context_status"] == "available"
+    assert data["reviews"]["cn"]["indices"][0]["name"] == "上证指数"
+
+
 def test_financials_latest(monkeypatch) -> None:
     def fake_build_financial_profile(symbol: str, exchange: str = "") -> dict:
         return {

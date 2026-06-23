@@ -417,6 +417,74 @@ function ReportTaskProgress({ task }) {
   );
 }
 
+function formatPercent(value) {
+  if (value === null || value === undefined || value === "") return "N/A";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "N/A";
+  return `${number > 0 ? "+" : ""}${number.toFixed(2)}%`;
+}
+
+function MarketReviewPanel({ review }) {
+  const reviews = review?.reviews || {};
+  const markets = [
+    ["cn", "A 股"],
+    ["hk", "港股"],
+    ["us", "美股"],
+  ];
+
+  if (!review) {
+    return <p className="text-sm text-slate-500">正在加载市场复盘...</p>;
+  }
+
+  return (
+    <div className="grid gap-3 lg:grid-cols-3">
+      {markets.map(([market, label]) => {
+        const item = reviews[market];
+        const indices = item?.indices || [];
+        const summary = item?.summary || [];
+        return (
+          <div className="rounded-md border border-slate-800 bg-slate-950/70 p-3" key={market}>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-slate-100">{label}</div>
+              <span
+                className={classNames(
+                  "rounded-md border px-2 py-1 text-[11px]",
+                  item?.context_status === "available"
+                    ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100"
+                    : "border-amber-400/25 bg-amber-400/10 text-amber-100",
+                )}
+              >
+                {item?.context_status || "missing"}
+              </span>
+            </div>
+            <p className="min-h-10 text-xs leading-5 text-slate-400">{summary[0] || "暂无复盘数据。"}</p>
+            <div className="mt-3 space-y-2">
+              {indices.slice(0, 3).map((index) => (
+                <div className="flex items-center justify-between gap-2 text-xs" key={index.symbol}>
+                  <span className="truncate text-slate-300">{index.name}</span>
+                  <span
+                    className={classNames(
+                      "font-mono",
+                      Number(index.change_percent) > 0
+                        ? "text-emerald-200"
+                        : Number(index.change_percent) < 0
+                          ? "text-red-200"
+                          : "text-slate-400",
+                    )}
+                  >
+                    {formatPercent(index.change_percent)}
+                  </span>
+                </div>
+              ))}
+              {!indices.length && <div className="text-xs text-slate-500">指数数据暂缺。</div>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function extractExecutiveSummary(content) {
   if (!content) return [];
 
@@ -1079,6 +1147,7 @@ export default function App() {
   const [backendOnline, setBackendOnline] = useState(false);
   const [loading, setLoading] = useState("");
   const [reportTask, setReportTask] = useState(null);
+  const [marketReview, setMarketReview] = useState(null);
   const [remoteSymbol, setRemoteSymbol] = useState(null);
   const [symbolCandidates, setSymbolCandidates] = useState([]);
   const [symbolLookupStatus, setSymbolLookupStatus] = useState("idle");
@@ -1129,16 +1198,18 @@ export default function App() {
   async function loadDashboardData(targetCompany = companyName) {
     setError("");
     try {
-      const [healthData, configData, watchlistData, historyData] = await Promise.all([
+      const [healthData, configData, watchlistData, historyData, marketReviewData] = await Promise.all([
         requestJson("/health"),
         requestJson("/config"),
         requestJson("/memory/watchlist"),
         requestJson("/memory/history"),
+        requestJson("/market/review?market=auto"),
       ]);
       setBackendOnline(healthData.status === "ok");
       setRuntimeConfig(configData);
       setWatchlist(watchlistData);
       setHistory(historyData);
+      setMarketReview(marketReviewData);
       setSelectedHistoryIndex(0);
     } catch (err) {
       setBackendOnline(false);
@@ -1598,6 +1669,10 @@ export default function App() {
                 生成投研报告
               </button>
             </div>
+          </Panel>
+
+          <Panel title="市场复盘" icon={Activity}>
+            <MarketReviewPanel review={marketReview} />
           </Panel>
 
           <Panel title="最新财报" icon={FileText}>
