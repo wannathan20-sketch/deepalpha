@@ -1,4 +1,8 @@
-from datetime import datetime
+import importlib
+import importlib.util
+import math
+import re
+from datetime import datetime, timedelta
 
 from app.tools.sec_filings import (
     get_companyfacts,
@@ -6,6 +10,7 @@ from app.tools.sec_filings import (
     normalize_us_ticker,
     ticker_to_cik,
 )
+from app.tools.market_symbols import MarketSymbol, normalize_market_symbol
 
 
 METRIC_DEFINITIONS = {
@@ -64,6 +69,16 @@ METRIC_DEFINITIONS = {
 }
 ACCEPTED_FACT_FORMS = {"10-K", "10-Q", "20-F", "40-F", "6-K"}
 MONETARY_UNITS = {"USD", "EUR", "GBP", "CNY", "HKD", "JPY", "CAD", "AUD", "CHF", "SEK", "DKK", "NOK"}
+AKSHARE_FINANCIAL_FIELDS = [
+    "revenue",
+    "net_income",
+    "gross_margin_percent",
+    "net_margin_percent",
+    "roe_percent",
+    "debt_to_asset_percent",
+    "operating_cash_flow",
+]
+ANNOUNCEMENT_LOOKBACK_DAYS = 730
 
 # Balance-sheet metrics are point-in-time facts; income/cash-flow metrics are period-duration facts.
 # 资产负债表指标是时点数据，利润表/现金流指标是期间数据，筛选逻辑需要区分两类事实。
@@ -84,6 +99,204 @@ def _round_number(value: float | int | None, digits: int = 2) -> float | int | N
         return value
     rounded = round(value, digits)
     return int(rounded) if rounded.is_integer() else rounded
+
+
+def _records(frame: object) -> list[dict]:
+    if frame is None or getattr(frame, "empty", True):
+        return []
+    records = frame.to_dict("records")
+    return records if isinstance(records, list) else []
+
+
+def _akshare_module():
+    if importlib.util.find_spec("akshare") is None:
+        raise RuntimeError("AkShare is not installed.")
+    return importlib.import_module("akshare")
+
+
+def _normalize_column_name(value: object) -> str:
+    return re.sub(r"[\s_()（）%/\\:：,，.-]+", "", str(value or "")).lower()
+
+
+def _matching_column(record: dict, candidates: list[str]) -> str:
+    for candidate in candidates:
+        if candidate in record:
+            return candidate
+
+    normalized = {key: _normalize_column_name(key) for key in record}
+    for candidate in candidates:
+        clean_candidate = _normalize_column_name(candidate)
+        if not clean_candidate:
+            continue
+        for key, clean_key in normalized.items():
+            if clean_key == clean_candidate:
+                return key
+        for key, clean_key in normalized.items():
+            if len(clean_candidate) >= 4 and (clean_candidate in clean_key or clean_key in clean_candidate):
+                return key
+    return ""
+
+
+def _column_scale(column: str) -> int:
+    if "亿元" in column:
+        return 100_000_000
+    if "万元" in column:
+        return 10_000
+    return 1
+
+
+def _coerce_number(value: object, scale: int = 1) -> float | int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+    else:
+        text = str(value or "").strip()
+        if text in {"", "-", "--", "—", "nan", "None", "不适用"}:
+            return None
+        negative = text.startswith("(") and text.endswith(")")
+        text = (
+            text.strip("()")
+            .replace(",", "")
+            .replace("，", "")
+            .replace("%", "")
+            .replace("亿元", "")
+            .replace("万元", "")
+            .replace("元", "")
+        )
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+        if negative:
+            number = -number
+    if not math.isfinite(number):
+        return None
+    return _round_number(number * scale)
+
+
+def _extract_numeric(record: dict, candidates: list[str]) -> float | int | None:
+    column = _matching_column(record, candidates)
+    if not column:
+        return None
+    return _coerce_number(record.get(column), _column_scale(column))
+
+
+def _extract_text(record: dict, candidates: list[str]) -> str:
+    column = _matching_column(record, candidates)
+    if not column:
+        return ""
+    return str(record.get(column) or "").strip()
+
+
+def _date_text(value: object) -> str:
+    if not value:
+        return ""
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    text = str(value).strip()
+    if not text:
+        return ""
+    text = text.split(" ", 1)[0].replace("/", "-")
+    if re.fullmatch(r"\d{8}", text):
+        return f"{text[:4]}-{text[4:6]}-{text[6:]}"
+    return text
+
+
+def _record_date(record: dict) -> str:
+    return _date_text(
+        _extract_text(
+            record,
+            [
+                "REPORT_DATE",
+                "报告日期",
+                "报告期",
+                "报表日期",
+                "截止日期",
+                "日期",
+                "公告日期",
+                "披露日期",
+                "NOTICE_DATE",
+            ],
+        )
+    )
+
+
+def _latest_record(records: list[dict]) -> dict:
+    if not records:
+        return {}
+    return sorted(records, key=lambda record: _record_date(record), reverse=True)[0]
+
+
+def _safe_akshare_records(function: object, *args, **kwargs) -> tuple[list[dict], str]:
+    try:
+        return _records(function(*args, **kwargs)), ""
+    except Exception as exc:
+        return [], type(exc).__name__
+
+
+def _announcement_records(ak: object, symbol: MarketSymbol) -> tuple[list[dict], list[str]]:
+    function = getattr(ak, "stock_individual_notice_report", None)
+    if function is None:
+        return [], []
+
+    end_date = datetime.now().date()
+    begin_date = end_date - timedelta(days=ANNOUNCEMENT_LOOKBACK_DAYS)
+    records, error = _safe_akshare_records(
+        function,
+        symbol.local_symbol,
+        symbol="财务报告",
+        begin_date=begin_date.strftime("%Y%m%d"),
+        end_date=end_date.strftime("%Y%m%d"),
+    )
+    return records, [error] if error else []
+
+
+def _announcements_from_records(records: list[dict], source: str) -> list[dict]:
+    announcements = []
+    for record in sorted(records, key=lambda item: _record_date(item), reverse=True)[:5]:
+        title = _extract_text(record, ["公告标题", "标题", "title", "NOTICE_TITLE", "ANNOUNCEMENT_TITLE"])
+        url = _extract_text(record, ["公告链接", "链接", "url", "URL", "attach_url", "ATTACHMENT_URL"])
+        if not title and not url:
+            continue
+        announcements.append(
+            {
+                "date": _record_date(record),
+                "title": title,
+                "url": url,
+                "type": _extract_text(record, ["公告类型", "类型", "notice_type", "ANNOUNCEMENT_TYPE"]),
+                "source": source,
+            }
+        )
+    return announcements
+
+
+def _akshare_summary(profile: dict) -> list[str]:
+    if not profile.get("enabled"):
+        return [profile.get("reason", "财报数据暂不可用。")]
+
+    summary = []
+    revenue = profile.get("revenue")
+    net_income = profile.get("net_income")
+    gross_margin = profile.get("gross_margin_percent")
+    net_margin = profile.get("net_margin_percent")
+    roe = profile.get("roe_percent")
+    debt_to_asset = profile.get("debt_to_asset_percent")
+    ocf = profile.get("operating_cash_flow")
+
+    if revenue is not None:
+        summary.append(f"最新披露收入为 {revenue:,}。")
+    if net_income is not None:
+        summary.append(f"净利润为 {net_income:,}。")
+    if gross_margin is not None or net_margin is not None:
+        summary.append(f"毛利率 {gross_margin if gross_margin is not None else '待补充'}%，净利率 {net_margin if net_margin is not None else '待补充'}%。")
+    if roe is not None or debt_to_asset is not None:
+        summary.append(f"ROE {roe if roe is not None else '待补充'}%，资产负债率 {debt_to_asset if debt_to_asset is not None else '待补充'}%。")
+    if ocf is not None:
+        summary.append(f"经营现金流为 {ocf:,}。")
+    if profile.get("announcements"):
+        summary.append(f"已获取 {len(profile['announcements'])} 条财报/公告链接。")
+    return summary or ["财报来源已返回，但结构化字段仍需进一步映射。"]
 
 
 def _pct(numerator: float | int | None, denominator: float | int | None) -> float | None:
@@ -260,10 +473,250 @@ def _build_summary(profile: dict) -> list[str]:
     if cash is not None or debt is not None:
         summary.append(f"现金 {cash if cash is not None else '待补充'}，总债务 {debt if debt is not None else '待补充'}。")
 
-    return summary or ["SEC companyfacts 已返回，但核心字段仍需进一步映射。"]
+    return summary or [f"{profile.get('source', '财报来源')} 已返回，但核心字段仍需进一步映射。"]
 
 
-def build_financial_profile(symbol: str | None, exchange: str | None = None) -> dict:
+AKSHARE_FIELD_CANDIDATES = {
+    "revenue": [
+        "TOTAL_OPERATE_INCOME",
+        "OPERATE_INCOME",
+        "营业总收入",
+        "营业收入",
+        "主营业务收入",
+        "主营业务收入(万元)",
+        "收入",
+        "营业额",
+        "Revenue",
+    ],
+    "gross_profit": ["GROSS_PROFIT", "毛利润", "毛利", "Gross Profit"],
+    "net_income": [
+        "PARENT_NETPROFIT",
+        "NETPROFIT",
+        "归属于母公司股东的净利润",
+        "归属母公司股东的净利润",
+        "归母净利润",
+        "净利润",
+        "净利润(万元)",
+        "Net Profit",
+    ],
+    "gross_margin_percent": ["GROSS_PROFIT_RATIO", "销售毛利率", "销售毛利率(%)", "毛利率", "Gross Margin"],
+    "net_margin_percent": ["NETPROFIT_MARGIN", "销售净利率", "销售净利率(%)", "净利率", "Net Margin"],
+    "roe_percent": ["ROE_WEIGHT", "ROE", "加权净资产收益率", "净资产收益率", "净资产收益率(%)"],
+    "debt_to_asset_percent": ["DEBT_ASSET_RATIO", "资产负债率", "资产负债率(%)"],
+    "operating_cash_flow": [
+        "NETCASH_OPERATE",
+        "经营活动产生的现金流量净额",
+        "经营活动现金流量净额",
+        "经营现金流量净额",
+        "经营现金净流量",
+        "经营现金净流量(万元)",
+        "Operating Cash Flow",
+    ],
+    "total_assets": ["TOTAL_ASSETS", "资产总计", "总资产", "Total Assets"],
+    "total_liabilities": ["TOTAL_LIABILITIES", "负债合计", "总负债", "Total Liabilities"],
+}
+
+
+def _akshare_values_from_record(record: dict, cash_flow_record: dict | None = None) -> dict:
+    cash_flow_record = cash_flow_record or {}
+    values = {
+        key: _extract_numeric(record, candidates)
+        for key, candidates in AKSHARE_FIELD_CANDIDATES.items()
+    }
+    if values["operating_cash_flow"] is None and cash_flow_record:
+        values["operating_cash_flow"] = _extract_numeric(cash_flow_record, AKSHARE_FIELD_CANDIDATES["operating_cash_flow"])
+    if values["total_assets"] and values["total_liabilities"] and values["debt_to_asset_percent"] is None:
+        values["debt_to_asset_percent"] = _pct(values["total_liabilities"], values["total_assets"])
+    if values["revenue"] and values["gross_margin_percent"] is not None and values["gross_profit"] is None:
+        values["gross_profit"] = _round_number(values["revenue"] * values["gross_margin_percent"] / 100)
+    return values
+
+
+def _akshare_profile_from_values(
+    *,
+    symbol: MarketSymbol,
+    source: str,
+    currency: str,
+    report_date: str,
+    values: dict,
+    announcements: list[dict],
+    errors: list[str],
+) -> dict:
+    missing_fields = [field for field in AKSHARE_FINANCIAL_FIELDS if values.get(field) is None]
+    has_metric = any(value is not None for value in values.values())
+    if not has_metric and not announcements:
+        status = "fetch_failed" if errors else "missing"
+        reason = errors[0] if errors else "No AkShare financial or announcement records returned."
+        return {
+            "enabled": False,
+            "context_status": status,
+            "market": symbol.market,
+            "symbol": symbol.canonical_symbol,
+            "source": source,
+            "reason": reason,
+            "summary": [reason],
+        }
+
+    status = "partial" if missing_fields or not has_metric else "available"
+    profile = {
+        "enabled": True,
+        "context_status": status,
+        "market": symbol.market,
+        "symbol": symbol.canonical_symbol,
+        "source": source,
+        "currency": currency,
+        "fiscal_period": report_date,
+        "filing_type": "财务报告",
+        "filing_url": announcements[0]["url"] if announcements else "",
+        "report_date": report_date,
+        "filing_date": announcements[0]["date"] if announcements else "",
+        "revenue": values.get("revenue"),
+        "gross_profit": values.get("gross_profit"),
+        "gross_margin_percent": values.get("gross_margin_percent"),
+        "operating_income": None,
+        "operating_margin_percent": None,
+        "net_income": values.get("net_income"),
+        "net_margin_percent": values.get("net_margin_percent"),
+        "eps_diluted": None,
+        "operating_cash_flow": values.get("operating_cash_flow"),
+        "capex": None,
+        "free_cash_flow": None,
+        "cash": None,
+        "debt": None,
+        "total_assets": values.get("total_assets"),
+        "total_liabilities": values.get("total_liabilities"),
+        "shareholders_equity": None,
+        "roe_percent": values.get("roe_percent"),
+        "debt_to_asset_percent": values.get("debt_to_asset_percent"),
+        "missing_fields": missing_fields,
+        "announcements": announcements,
+        "metrics": {
+            key: {"value": value, "source": source, "report_date": report_date}
+            for key, value in values.items()
+        },
+    }
+    warnings = [f"AkShare call failed: {error}" for error in errors if error]
+    if missing_fields:
+        warnings.append(f"Missing structured fields: {', '.join(missing_fields)}")
+    if warnings:
+        profile["warnings"] = warnings
+    profile["summary"] = _akshare_summary(profile)
+    return profile
+
+
+def _fetch_cn_financial_records(ak: object, symbol: MarketSymbol) -> tuple[list[dict], list[str]]:
+    errors = []
+    function = getattr(ak, "stock_financial_analysis_indicator_em", None)
+    if function is not None:
+        records, error = _safe_akshare_records(function, f"{symbol.local_symbol}.{symbol.exchange}", indicator="按报告期")
+        if records:
+            return records, errors
+        if error:
+            errors.append(error)
+
+    function = getattr(ak, "stock_financial_analysis_indicator", None)
+    if function is not None:
+        records, error = _safe_akshare_records(function, symbol.local_symbol, start_year=str(datetime.now().year - 5))
+        if records:
+            return records, errors
+        if error:
+            errors.append(error)
+    return [], errors
+
+
+def _fetch_cn_cash_flow_records(ak: object, symbol: MarketSymbol) -> tuple[list[dict], list[str]]:
+    function = getattr(ak, "stock_cash_flow_sheet_by_report_em", None)
+    if function is None:
+        return [], []
+    records, error = _safe_akshare_records(function, symbol.canonical_symbol)
+    return records, [error] if error else []
+
+
+def _build_cn_financial_profile(symbol: MarketSymbol) -> dict:
+    source = "akshare_cn"
+    try:
+        ak = _akshare_module()
+    except Exception as exc:
+        reason = type(exc).__name__
+        return {
+            "enabled": False,
+            "context_status": "fetch_failed",
+            "market": "cn",
+            "symbol": symbol.canonical_symbol,
+            "source": source,
+            "reason": reason,
+            "summary": [str(exc)],
+        }
+
+    records, errors = _fetch_cn_financial_records(ak, symbol)
+    latest = _latest_record(records)
+    cash_records, cash_errors = _fetch_cn_cash_flow_records(ak, symbol)
+    announcements_records, announcement_errors = _announcement_records(ak, symbol)
+    errors.extend(cash_errors)
+    errors.extend(announcement_errors)
+    values = _akshare_values_from_record(latest, _latest_record(cash_records)) if latest else {}
+    return _akshare_profile_from_values(
+        symbol=symbol,
+        source=source,
+        currency="CNY",
+        report_date=_record_date(latest),
+        values=values,
+        announcements=_announcements_from_records(announcements_records, source),
+        errors=errors,
+    )
+
+
+def _fetch_hk_financial_records(ak: object, symbol: MarketSymbol) -> tuple[list[dict], list[str]]:
+    function = getattr(ak, "stock_financial_hk_analysis_indicator_em", None)
+    if function is None:
+        return [], []
+    records, error = _safe_akshare_records(function, symbol.local_symbol, indicator="年度")
+    return records, [error] if error else []
+
+
+def _fetch_hk_cash_flow_records(ak: object, symbol: MarketSymbol) -> tuple[list[dict], list[str]]:
+    function = getattr(ak, "stock_financial_hk_report_em", None)
+    if function is None:
+        return [], []
+    records, error = _safe_akshare_records(function, stock=symbol.local_symbol, symbol="现金流量表", indicator="年度")
+    return records, [error] if error else []
+
+
+def _build_hk_financial_profile(symbol: MarketSymbol) -> dict:
+    source = "akshare_hk"
+    try:
+        ak = _akshare_module()
+    except Exception as exc:
+        reason = type(exc).__name__
+        return {
+            "enabled": False,
+            "context_status": "fetch_failed",
+            "market": "hk",
+            "symbol": symbol.canonical_symbol,
+            "source": source,
+            "reason": reason,
+            "summary": [str(exc)],
+        }
+
+    records, errors = _fetch_hk_financial_records(ak, symbol)
+    cash_records, cash_errors = _fetch_hk_cash_flow_records(ak, symbol)
+    announcements_records, announcement_errors = _announcement_records(ak, symbol)
+    errors.extend(cash_errors)
+    errors.extend(announcement_errors)
+    latest = _latest_record(records)
+    values = _akshare_values_from_record(latest, _latest_record(cash_records)) if latest else {}
+    return _akshare_profile_from_values(
+        symbol=symbol,
+        source=source,
+        currency="HKD",
+        report_date=_record_date(latest),
+        values=values,
+        announcements=_announcements_from_records(announcements_records, source),
+        errors=errors,
+    )
+
+
+def _build_sec_financial_profile(symbol: str | None, exchange: str | None = None) -> dict:
     """Build a compact financial profile from SEC Companyfacts.
     基于 SEC Companyfacts 构建前端和 Agent 可直接使用的财务画像。
     """
@@ -276,12 +729,12 @@ def build_financial_profile(symbol: str | None, exchange: str | None = None) -> 
             "symbol": symbol,
             "source": "sec_companyfacts",
             "reason": (
-                "SEC companyfacts MVP currently supports US-listed tickers only."
+                "Financial profile currently supports US SEC tickers plus A-share/HK AkShare symbols."
                 if has_symbol
                 else "No financial symbol provided."
             ),
             "summary": [
-                "当前仅支持美股 SEC companyfacts，港股/A 股需后续接 HKEX/交易所数据源。"
+                "当前财报画像支持美股 SEC companyfacts，以及 A 股/港股 AkShare 可用财务与公告接口。"
                 if has_symbol
                 else "未提供可用于财报查询的股票代码。"
             ],
@@ -370,3 +823,20 @@ def build_financial_profile(symbol: str | None, exchange: str | None = None) -> 
     }
     profile["summary"] = _build_summary(profile)
     return profile
+
+
+def build_financial_profile(symbol: str | None, exchange: str | None = None) -> dict:
+    has_symbol = bool(str(symbol or "").strip())
+    if not has_symbol:
+        return _build_sec_financial_profile(symbol, exchange)
+
+    try:
+        market_symbol = normalize_market_symbol(symbol or "", exchange)
+    except ValueError:
+        return _build_sec_financial_profile(symbol, exchange)
+
+    if market_symbol.market == "cn":
+        return _build_cn_financial_profile(market_symbol)
+    if market_symbol.market == "hk":
+        return _build_hk_financial_profile(market_symbol)
+    return _build_sec_financial_profile(symbol, exchange)

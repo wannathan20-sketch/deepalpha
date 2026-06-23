@@ -47,7 +47,7 @@ def _build_context_text(agent_outputs: dict) -> str:
 
 def _build_financial_profile_text(financial_profile: dict) -> str:
     if not financial_profile.get("enabled"):
-        return f"SEC 财报摘要不可用：{financial_profile.get('reason', '未提供结构化财报数据。')}"
+        return f"财报摘要不可用：{financial_profile.get('reason', '未提供结构化财报数据。')}"
 
     fields = [
         ("Source", financial_profile.get("source")),
@@ -126,11 +126,11 @@ def analyze(company_name: str, context: dict) -> dict:
                 "8. 财务与估值约束\n"
                 "9. 来源可信度与低质量来源警告\n"
                 "10. 不足与待验证数据\n\n"
-                "SEC 结构化财报事实是财务和估值约束的优先锚点，最终结论不得与这些财务事实冲突。\n"
+                "结构化财报事实是财务和估值约束的优先锚点，最终结论不得与这些财务事实冲突。\n"
                 "请使用清晰、专业、克制的中文。不要提及 mock、占位或测试。"
                 "不要使用“好的”“作为某某 Agent”等对话式开头。不要重复上游 Agent 原文。不要输出 Markdown 装饰符号。\n\n"
                 f"{memory_text}\n\n"
-                f"SEC 结构化财报事实：\n{financial_profile_text}\n\n"
+                f"结构化财报事实：\n{financial_profile_text}\n\n"
                 f"{context_text}"
             ),
             system_prompt="你是深研 Alpha 的 Committee Agent，负责综合投研判断。",

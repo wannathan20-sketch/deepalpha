@@ -308,19 +308,19 @@ function LatestFinancials({ profile, status }) {
     return (
       <div className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-950/70 p-3 text-sm text-slate-400">
         <Loader2 className="h-4 w-4 animate-spin" />
-        正在加载 SEC 最新财报...
+        正在加载最新财报...
       </div>
     );
   }
 
   if (!profile) {
-    return <p className="text-sm text-slate-500">选择美股标的后会自动加载 SEC 最新财报摘要。</p>;
+    return <p className="text-sm text-slate-500">选择标的后会自动加载可用的最新财报摘要。</p>;
   }
 
   if (!profile.enabled) {
     return (
       <div className="rounded-md border border-amber-400/25 bg-amber-400/10 p-3 text-sm leading-6 text-amber-100">
-        {profile.reason || "暂无可用 SEC 财报摘要。"}
+        {profile.reason || "暂无可用财报摘要。"}
       </div>
     );
   }

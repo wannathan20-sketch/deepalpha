@@ -300,7 +300,7 @@ def financials_latest(symbol: str, request: Request, exchange: str = "") -> dict
         limit=get_int_env("FINANCIALS_RATE_LIMIT", 60),
         window_seconds=60,
     )
-    cache_key = f"financials:sec:{symbol.strip().lower()}:{exchange.strip().lower()}"
+    cache_key = f"financials:latest:{symbol.strip().lower()}:{exchange.strip().lower()}"
     try:
         data, cache_hit = cache.get_or_set(
             cache_key,
@@ -321,9 +321,10 @@ def financials_latest(symbol: str, request: Request, exchange: str = "") -> dict
         return {
             "enabled": False,
             "symbol": symbol,
-            "source": "sec_companyfacts",
+            "source": "financial_profile",
+            "context_status": "fetch_failed",
             "reason": str(exc),
-            "summary": [f"SEC financial data unavailable: {exc}"],
+            "summary": [f"Financial data unavailable: {exc}"],
             "cache_hit": False,
         }
 

@@ -11,7 +11,7 @@ DeepAlpha 是一个面向 A 股、港股和美股的多智能体投研系统。�
 - 多市场支持：A 股、港股、美股的证券识别、行情路由和图表展示。
 - 多 Agent 工作流：规划、行业、基本面、财务、估值、技术、新闻、情绪、多空辩论、交易观点、风险审查、来源质量和委员会总结。
 - 多源检索：支持 Brave Search、BlockBeats、Tavily；生产环境搜索失败时标记数据缺失，不用 mock 伪造来源。
-- 财务数据：美股接入 SEC EDGAR companyfacts，提取收入、利润、现金流、资产负债和 EPS 等常用字段。
+- 财务数据：美股接入 SEC EDGAR companyfacts；A 股和港股接入 AkShare 可用财务摘要与公告接口，按字段稳定性标记数据质量。
 - 数据质量层：用 `AnalysisContextPack` 标记 `available`、`fallback`、`partial`、`missing`、`not_supported`、`fetch_failed` 等状态。
 - 报告可靠性：引用覆盖检查、来源质量评估、Agent trace、Markdown 报告编辑和风险提示。
 - 生产约束：`APP_ENV=production` 下禁止 mock LLM 和 mock 搜索；LLM 失败返回明确错误，搜索失败记录为缺失数据。
@@ -50,7 +50,7 @@ flowchart LR
 | LLM | DeepSeek、OpenAI、开发测试 mock |
 | 检索 | Brave Search、BlockBeats、Tavily、Chroma |
 | 行情 | AkShare、Yahoo Finance、Finnhub、Efinance、Baostock |
-| 财务 | SEC EDGAR companyfacts |
+| 财务 | SEC EDGAR companyfacts、AkShare |
 | 存储 | SQLite、Chroma |
 | 前端 | React、Vite、Tailwind CSS、Lucide Icons |
 | 测试 / CI | pytest、GitHub Actions、Vite build |
@@ -73,8 +73,9 @@ flowchart LR
 
 | 数据类型 | 来源 | 当前边界 |
 | --- | --- | --- |
-| 美股财务 | SEC EDGAR companyfacts | 覆盖美国上市公司和部分提交 20-F 的外国发行人 |
-| A 股 / 港股财务 | 暂未接入交易所公告源 | 会标记为 `not_supported`、`missing` 或 `partial` |
+| 美股财务 | SEC EDGAR companyfacts | 覆盖美国上市公司和部分提交 20-F 的外国发行人；SEC 元数据失败时保留结构化事实并标记 `partial` |
+| A 股财务与公告 | AkShare 东方财富/新浪可用接口 | 提取最近财务摘要中的收入、净利润、毛利率、净利率、ROE、资产负债率、经营现金流等可映射字段，并附最近财报公告链接；字段缺失标记 `partial`，接口无记录标记 `missing`，调用失败标记 `fetch_failed` |
+| 港股财务与公告 | AkShare 东方财富港股财务与公告接口 | 优先返回公告/财报链接和可稳定映射的基础摘要；结构化字段不稳定时只返回真实可得字段，并在 `missing_fields` 中标明缺口，不用估算或 mock 补数 |
 | 通用网页搜索 | Brave Search、Tavily | 需要 API Key |
 | 垂直资讯 | BlockBeats | 适合 Web3、加密市场相关信息，需要 API Key |
 | 本地开发 | mock provider | 仅限开发和自动化测试 |

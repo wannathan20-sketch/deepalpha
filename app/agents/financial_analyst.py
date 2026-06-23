@@ -12,7 +12,7 @@ def _build_context_text(sources: list[dict]) -> str:
 
 def _build_financial_profile_text(financial_profile: dict) -> str:
     if not financial_profile.get("enabled"):
-        return f"SEC 财报摘要不可用：{financial_profile.get('reason', '未提供美股 symbol。')}"
+        return f"财报摘要不可用：{financial_profile.get('reason', '未提供结构化财报数据。')}"
 
     fields = [
         ("Symbol", financial_profile.get("symbol")),
@@ -51,25 +51,25 @@ def analyze(company_name: str, context: dict) -> dict:
     financial_profile_text = _build_financial_profile_text(financial_profile)
     summary = generate_text(
         prompt=(
-            f"请基于 SEC 结构化财报摘要和公开信息，为 {company_name} 生成财务分析。\n"
-            "SEC companyfacts 是财务数字的优先事实来源；新闻和网页搜索只用于补充解释。\n"
+            f"请基于结构化财报摘要和公开信息，为 {company_name} 生成财务分析。\n"
+            "结构化财报来源是财务数字的优先事实锚点；新闻和网页搜索只用于补充解释。\n"
             "必须覆盖：收入趋势、毛利率、经营利润率、净利润、经营现金流、分业务收入或地区结构、资产负债表风险。\n"
             "如果公开信息不足，请明确写出“待补充数据”，不要编造数字。\n"
             "要求：不要使用对话式开头，不要重复来源原文，不要输出 Markdown 装饰符号。\n\n"
             f"{memory_text}\n\n"
-            f"SEC 结构化财报摘要：\n{financial_profile_text}\n\n"
+            f"结构化财报摘要：\n{financial_profile_text}\n\n"
             f"{context_text}"
         ),
         system_prompt="你是深研 Alpha 的 Financial Analyst，负责财务报表分析。",
         max_tokens=700,
     )
 
-    sec_sources = []
+    financial_sources = []
     if financial_profile.get("filing_url"):
-        sec_sources.append(
+        financial_sources.append(
             {
-                "title": f"SEC {financial_profile.get('filing_type', 'filing')} for {financial_profile.get('symbol', company_name)}",
-                "snippet": "SEC companyfacts and latest filing metadata used for structured financial metrics.",
+                "title": f"{financial_profile.get('source', 'financial filing')} {financial_profile.get('filing_type', 'filing')} for {financial_profile.get('symbol', company_name)}",
+                "snippet": "Structured financial profile and latest filing metadata used for financial metrics.",
                 "url": financial_profile.get("filing_url"),
             }
         )
@@ -78,7 +78,7 @@ def analyze(company_name: str, context: dict) -> dict:
         agent="Financial Analyst",
         summary=summary,
         confidence=0.78 if financial_profile.get("enabled") else 0.72,
-        sources=sec_sources + sources,
+        sources=financial_sources + sources,
         risks=[
             "公开搜索结果不能替代正式财报，收入、利润率和现金流需以公司披露文件复核。",
             "缺少分业务数据时，无法判断增长质量与利润贡献结构。",

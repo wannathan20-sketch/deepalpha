@@ -160,7 +160,7 @@ def test_financial_profile_distinguishes_missing_and_unsupported() -> None:
     from app.services.financials import build_financial_profile
 
     missing = build_financial_profile(None)
-    unsupported = build_financial_profile("0700.HK", "HKEX")
+    unsupported = build_financial_profile("BTC-USD", "CRYPTO")
 
     assert missing["context_status"] == "missing"
     assert unsupported["context_status"] == "not_supported"

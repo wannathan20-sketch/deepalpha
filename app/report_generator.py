@@ -271,13 +271,13 @@ def generate_markdown_report(
         )
         filing_url = _sanitize_url(financial_profile.get("filing_url", ""))
         if filing_url and filing_url != "#":
-            lines.append(f"- Filing URL：[SEC]({filing_url})")
+            lines.append(f"- Filing URL：[{_sanitize_text(financial_profile.get('source', 'filing'))}]({filing_url})")
         summary_items = financial_profile.get("summary", [])
         if summary_items:
             lines.extend(["", "结构化摘要："])
             lines.extend(_render_key_points(summary_items))
     else:
-        lines.append(f"暂无可用 SEC 财报摘要。{_sanitize_text(financial_profile.get('reason', ''))}")
+        lines.append(f"暂无可用财报摘要。{_sanitize_text(financial_profile.get('reason', ''))}")
 
     sections = [
         ("## 2. 行业研究分析", "industry"),

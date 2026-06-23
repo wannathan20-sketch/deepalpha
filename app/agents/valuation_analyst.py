@@ -25,7 +25,7 @@ def _build_market_text(market_profile: dict) -> str:
 
 def _build_financial_text(financial_profile: dict) -> str:
     if not financial_profile.get("enabled"):
-        return f"财报摘要不可用：{financial_profile.get('reason', '未提供 SEC 财报数据。')}"
+        return f"财报摘要不可用：{financial_profile.get('reason', '未提供结构化财报数据。')}"
 
     fields = [
         ("Source", financial_profile.get("source")),
@@ -57,14 +57,14 @@ def analyze(company_name: str, context: dict) -> dict:
 
     summary = generate_text(
         prompt=(
-            f"请基于已有 Agent 结果、行情摘要和 SEC 财务事实，为 {company_name} 生成估值分析。\n"
+            f"请基于已有 Agent 结果、行情摘要和结构化财务事实，为 {company_name} 生成估值分析。\n"
             "必须覆盖：PE、PS、EV/EBITDA、可比公司估值、Bull/Base/Bear 情景、估值约束和安全边际。\n"
             "如果缺少市值、净利润、收入、EBITDA 或可比公司数据，请明确标注“待补充数据”，不要编造倍数或目标价。\n"
-            "SEC 财务事实用于约束收入、利润、现金流、现金和债务，不得与其冲突。\n"
+            "结构化财务事实用于约束收入、利润、现金流、现金和债务，不得与其冲突。\n"
             "输出应是研究判断，不得给出交易指令。\n"
             "要求：不要使用对话式开头，不要重复上游 Agent 原文，不要输出 Markdown 装饰符号。\n\n"
             f"行情摘要：\n{market_text}\n\n"
-            f"SEC 财务事实：\n{financial_text}\n\n"
+            f"结构化财务事实：\n{financial_text}\n\n"
             f"结构化 Agent 上下文：\n{context_text}"
         ),
         system_prompt="你是深研 Alpha 的 Valuation Analyst，负责估值与情景分析。",
@@ -85,7 +85,7 @@ def analyze(company_name: str, context: dict) -> dict:
         sources.append(
             {
                 "title": clean_markdown_artifacts(
-                    f"SEC {financial_profile.get('filing_type', 'filing')} for {financial_profile.get('symbol', company_name)}"
+                    f"{financial_profile.get('source', 'financial filing')} {financial_profile.get('filing_type', 'filing')} for {financial_profile.get('symbol', company_name)}"
                 ),
                 "url": financial_profile.get("filing_url", "#"),
             }
