@@ -730,6 +730,17 @@ def test_report_task() -> None:
     assert status_response.status_code == 200
     assert status_data["task_id"] == data["task_id"]
     assert status_data["status"] in {"queued", "running", "success", "failed"}
+    assert [step["name"] for step in status_data["steps"]] == [
+        "queued",
+        "fetch_market",
+        "fetch_financials",
+        "rag_search",
+        "agent_analysis",
+        "report_render",
+        "completed",
+        "failed",
+    ]
+    assert all("status" in step for step in status_data["steps"])
 
 
 def test_report_task_rate_limit(monkeypatch) -> None:

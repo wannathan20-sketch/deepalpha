@@ -382,6 +382,7 @@ def run_deepalpha_graph(
     thread_id: str | None = None,
     market_profile: dict | None = None,
     financial_profile: dict | None = None,
+    progress_callback=None,
 ) -> dict:
     """Public graph runner used by API endpoints.
     API 入口调用的图执行函数，负责初始化状态、运行工作流并整理响应。
@@ -409,10 +410,31 @@ def run_deepalpha_graph(
         "citation_check": {},
         "trace": trace,
     }
-    final_state = deepalpha_graph.invoke(
-        initial_state,
-        config={"configurable": {"thread_id": thread_id}},
-    )
+    graph_config = {"configurable": {"thread_id": thread_id}}
+    if progress_callback is None:
+        final_state = deepalpha_graph.invoke(initial_state, config=graph_config)
+    else:
+        final_state = initial_state
+        progress_callback("rag_search", "start", "Searching RAG context.")
+        agent_analysis_started = False
+        report_render_started = False
+        for chunk in deepalpha_graph.stream(initial_state, config=graph_config):
+            if not isinstance(chunk, dict):
+                continue
+            for node_name, state_update in chunk.items():
+                if isinstance(state_update, dict):
+                    final_state = state_update
+                if node_name == "rag":
+                    progress_callback("rag_search", "finish", "RAG context ready.")
+                    progress_callback("agent_analysis", "start", "Running analyst agents.")
+                    agent_analysis_started = True
+                elif node_name == "committee":
+                    if agent_analysis_started:
+                        progress_callback("agent_analysis", "finish", "Analyst synthesis complete.")
+                    progress_callback("report_render", "start", "Rendering report.")
+                    report_render_started = True
+                elif node_name == "citation" and report_render_started:
+                    progress_callback("report_render", "finish", "Report rendered and checked.")
 
     return {
         "thread_id": thread_id,

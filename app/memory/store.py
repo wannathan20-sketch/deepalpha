@@ -77,6 +77,20 @@ def ensure_schema(connection: sqlite3.Connection | None = None) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_watchlist_tenant_user
             ON watchlist (tenant_id, user_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS report_tasks (
+            task_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            request_json TEXT NOT NULL,
+            result_json TEXT,
+            error TEXT,
+            steps_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_report_tasks_created_at
+            ON report_tasks (created_at DESC);
         """
     )
 

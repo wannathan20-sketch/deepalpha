@@ -1,6 +1,5 @@
 import hmac
 from contextlib import asynccontextmanager
-from threading import Lock
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
@@ -39,6 +38,7 @@ from app.services.financials import build_financial_profile
 from app.services.logging import log_event
 from app.services.market_summary import build_market_profile
 from app.services.rate_limit import rate_limit, rate_limiter
+from app.services import report_tasks
 from app.tools.market_data import get_market_chart
 from app.tools.symbol_lookup import lookup_symbol
 
@@ -66,12 +66,6 @@ app.add_middleware(
 @app.exception_handler(LLMProviderError)
 async def llm_provider_error_handler(request: Request, exc: LLMProviderError) -> JSONResponse:
     return JSONResponse(status_code=503, content={"detail": str(exc)})
-
-
-# In-memory task state is intentionally lightweight for the MVP; use Redis/DB for multi-worker deployments.
-# 当前异步任务状态仅保存在进程内，适合 MVP；多进程或生产部署应迁移到 Redis/数据库。
-REPORT_TASKS: dict[str, dict] = {}
-REPORT_TASKS_LOCK = Lock()
 
 
 def _check_limit(key: str, *, limit: int, window_seconds: int) -> None:
@@ -360,18 +354,31 @@ def _build_financial_profile_from_request(request: AnalyzeRequest) -> dict:
             "fetch_failed": True,
             "reason": str(exc),
             "symbol": symbol,
-            "source": "sec_companyfacts",
-            "summary": [f"SEC financial data unavailable: {exc}"],
+            "source": "financial_profile",
+            "summary": [f"Financial data unavailable: {exc}"],
         }
 
 
-def _run_analysis(request: AnalyzeRequest) -> dict:
+def _run_analysis(request: AnalyzeRequest, progress_callback=None) -> dict:
     """Assemble external data profiles, then hand off to the research graph.
     先构建外部行情/财报画像，再交给投研图执行完整分析。
     """
+    if progress_callback:
+        progress_callback("fetch_market", "start", "Fetching market profile.")
     market_profile = _build_market_profile_from_request(request)
+    if progress_callback:
+        progress_callback("fetch_market", "finish", "Market profile ready.")
+        progress_callback("fetch_financials", "start", "Fetching financial profile.")
     financial_profile = _build_financial_profile_from_request(request)
-    return run_deepalpha_graph(request.company_name, request.thread_id, market_profile, financial_profile)
+    if progress_callback:
+        progress_callback("fetch_financials", "finish", "Financial profile ready.")
+    return run_deepalpha_graph(
+        request.company_name,
+        request.thread_id,
+        market_profile,
+        financial_profile,
+        progress_callback=progress_callback,
+    )
 
 
 def _build_report_response(result: dict) -> dict:
@@ -401,11 +408,15 @@ def _run_report_task(task_id: str, request: AnalyzeRequest) -> None:
     长耗时报告生成的后台任务入口，负责状态流转和历史记录落库。
     """
     log_event("report_task_started", task_id=task_id, company_name=request.company_name)
-    with REPORT_TASKS_LOCK:
-        REPORT_TASKS[task_id]["status"] = "running"
+
+    def progress(step_name: str, action: str, message: str) -> None:
+        if action == "start":
+            report_tasks.start_step(task_id, step_name, message)
+        elif action == "finish":
+            report_tasks.finish_step(task_id, step_name, message)
 
     try:
-        result = _run_analysis(request)
+        result = _run_analysis(request, progress_callback=progress)
         save_research_history(
             result["company_name"],
             result["thread_id"],
@@ -416,12 +427,12 @@ def _run_report_task(task_id: str, request: AnalyzeRequest) -> None:
             data_provider=request.data_provider,
         )
         payload = _build_report_response(result)
-        with REPORT_TASKS_LOCK:
-            REPORT_TASKS[task_id].update({"status": "success", "result": payload, "error": None})
+        report_tasks.complete_task(task_id, payload)
         log_event("report_task_completed", task_id=task_id, company_name=result["company_name"])
     except Exception as exc:
-        with REPORT_TASKS_LOCK:
-            REPORT_TASKS[task_id].update({"status": "failed", "result": None, "error": str(exc)})
+        current = report_tasks.get_task(task_id) or {"steps": []}
+        running_steps = [step["name"] for step in current.get("steps", []) if step.get("status") == "running"]
+        report_tasks.fail_task(task_id, str(exc), failed_step=running_steps[-1] if running_steps else "failed")
         log_event("report_task_failed", task_id=task_id, company_name=request.company_name, error=str(exc))
 
 
@@ -462,25 +473,18 @@ def report(request: AnalyzeRequest, http_request: Request) -> dict:
 def create_report_task(request: AnalyzeRequest, background_tasks: BackgroundTasks, http_request: Request) -> dict:
     _enforce_report_generation_limits(http_request)
     task_id = str(uuid4())
-    with REPORT_TASKS_LOCK:
-        REPORT_TASKS[task_id] = {
-            "task_id": task_id,
-            "status": "queued",
-            "result": None,
-            "error": None,
-        }
+    task = report_tasks.create_task(task_id, request.model_dump(mode="json"))
 
     background_tasks.add_task(_run_report_task, task_id, request)
-    return {"task_id": task_id, "status": "queued"}
+    return {"task_id": task_id, "status": task["status"], "steps": task["steps"]}
 
 
 @app.get("/report/tasks/{task_id}", response_model=ReportTaskStatusResponse)
 def get_report_task(task_id: str) -> dict:
-    with REPORT_TASKS_LOCK:
-        task = REPORT_TASKS.get(task_id)
-        if task is None:
-            raise HTTPException(status_code=404, detail="Task not found")
-        return dict(task)
+    task = report_tasks.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
 
 
 @app.get("/memory/history")

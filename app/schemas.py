@@ -117,6 +117,7 @@ class ReportResponse(BaseModel):
 class ReportTaskCreateResponse(BaseModel):
     task_id: str
     status: str
+    steps: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ReportTaskStatusResponse(BaseModel):
@@ -127,3 +128,6 @@ class ReportTaskStatusResponse(BaseModel):
     status: str
     result: dict[str, Any] | None = None
     error: str | None = None
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: str | None = None
+    updated_at: str | None = None

@@ -364,6 +364,59 @@ function LatestFinancials({ profile, status }) {
   );
 }
 
+const REPORT_STEP_LABELS = {
+  queued: "排队",
+  fetch_market: "行情",
+  fetch_financials: "财报",
+  rag_search: "检索",
+  agent_analysis: "分析",
+  report_render: "报告",
+  completed: "完成",
+  failed: "失败",
+};
+
+function ReportTaskProgress({ task }) {
+  const steps = task?.steps || [];
+  if (!task && !steps.length) return null;
+
+  return (
+    <div className="mt-3 rounded-md border border-slate-800 bg-slate-950/70 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2 text-xs text-slate-400">
+        <span>报告任务状态：{task?.status || "queued"}</span>
+        {task?.task_id && <span className="font-mono text-[11px] text-slate-600">{task.task_id.slice(0, 8)}</span>}
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {steps.map((step) => {
+          const isRunning = step.status === "running";
+          const isSuccess = step.status === "success";
+          const isFailed = step.status === "failed";
+          const Icon = isRunning ? Loader2 : isSuccess ? CheckCircle2 : isFailed ? Activity : Clock3;
+          return (
+            <div
+              className={classNames(
+                "flex min-h-10 items-start gap-2 rounded-md border px-2 py-2 text-xs",
+                isSuccess && "border-emerald-400/25 bg-emerald-400/10 text-emerald-100",
+                isRunning && "border-cyan-400/25 bg-cyan-400/10 text-cyan-100",
+                isFailed && "border-red-400/25 bg-red-400/10 text-red-100",
+                !isSuccess && !isRunning && !isFailed && "border-slate-800 bg-slate-900/70 text-slate-500",
+              )}
+              key={step.name}
+            >
+              <Icon className={classNames("mt-0.5 h-3.5 w-3.5 shrink-0", isRunning && "animate-spin")} />
+              <div className="min-w-0">
+                <div className="font-medium">{REPORT_STEP_LABELS[step.name] || step.name}</div>
+                {(step.message || step.error) && (
+                  <div className="mt-1 break-words text-[11px] leading-4 opacity-80">{step.error || step.message}</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function extractExecutiveSummary(content) {
   if (!content) return [];
 
@@ -1025,7 +1078,7 @@ export default function App() {
   const [reportResult, setReportResult] = useState(null);
   const [backendOnline, setBackendOnline] = useState(false);
   const [loading, setLoading] = useState("");
-  const [reportTaskStatus, setReportTaskStatus] = useState("");
+  const [reportTask, setReportTask] = useState(null);
   const [remoteSymbol, setRemoteSymbol] = useState(null);
   const [symbolCandidates, setSymbolCandidates] = useState([]);
   const [symbolLookupStatus, setSymbolLookupStatus] = useState("idle");
@@ -1224,7 +1277,7 @@ export default function App() {
 
     const finalThreadId = generatedThreadId;
     setLoading("report");
-    setReportTaskStatus("queued");
+    setReportTask({ status: "queued", steps: [] });
     setError("");
     try {
       const task = await requestJson("/report/tasks", {
@@ -1238,11 +1291,12 @@ export default function App() {
           data_provider: backendMarketProvider,
         }),
       });
+      setReportTask(task);
 
       let taskResult = null;
       for (let attempt = 0; attempt < 180; attempt += 1) {
         const status = await requestJson(`/report/tasks/${task.task_id}`);
-        setReportTaskStatus(status.status);
+        setReportTask(status);
         if (status.status === "success") {
           taskResult = status.result;
           break;
@@ -1273,7 +1327,6 @@ export default function App() {
       }
     } finally {
       setLoading("");
-      setReportTaskStatus("");
     }
   }
 
@@ -1545,9 +1598,6 @@ export default function App() {
                 生成投研报告
               </button>
             </div>
-            {reportTaskStatus && (
-              <p className="mt-3 text-xs text-slate-500">报告任务状态：{reportTaskStatus}</p>
-            )}
           </Panel>
 
           <Panel title="最新财报" icon={FileText}>
@@ -1586,8 +1636,9 @@ export default function App() {
 
         <aside className="space-y-4">
           <Panel title="投研报告生成" icon={FileText}>
+            <ReportTaskProgress task={reportTask} />
             {reportResult ? (
-              <div className="space-y-4">
+              <div className="mt-4 space-y-4">
                 <div className="grid grid-cols-3 gap-2">
                   <MetricCard label="Decision" value={reportResult.final_report?.recommendation} icon={TrendingUp} />
                   <MetricCard label="Confidence" value={reportResult.final_report?.confidence} icon={ShieldCheck} />
