@@ -22,6 +22,7 @@ import {
   TrendingUp,
   Wrench,
 } from "lucide-react";
+import { loadStockIndex, mergeSymbolCandidates, searchStockIndex } from "./stockSearch.js";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 const DISCLAIMER_STORAGE_KEY = "deepalpha_disclaimer_accepted";
@@ -1028,6 +1029,7 @@ export default function App() {
   const [remoteSymbol, setRemoteSymbol] = useState(null);
   const [symbolCandidates, setSymbolCandidates] = useState([]);
   const [symbolLookupStatus, setSymbolLookupStatus] = useState("idle");
+  const [stockIndex, setStockIndex] = useState([]);
   const [marketProvider, setMarketProvider] = useState("auto");
   const backendMarketProvider = marketProvider === "tradingview" ? "auto" : marketProvider;
   const [financialProfile, setFinancialProfile] = useState(null);
@@ -1127,6 +1129,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+
+    loadStockIndex()
+      .then((items) => {
+        if (mounted) setStockIndex(items);
+      })
+      .catch(() => {
+        if (mounted) setStockIndex([]);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     const query = companyName.trim();
     if (!query) {
       setSymbolCandidates([]);
@@ -1134,16 +1152,32 @@ export default function App() {
       return undefined;
     }
 
+    const localMatches = searchStockIndex(query, stockIndex);
+    const immediateMatches = localMatches.length ? localMatches : findLocalFallbackMatches(query);
+    if (immediateMatches.length) {
+      setSymbolCandidates(immediateMatches);
+      if (shouldAutoSelectSymbol(immediateMatches)) {
+        selectSymbolCandidate(immediateMatches[0]);
+      } else {
+        setSymbolLookupStatus("candidates");
+      }
+    } else {
+      setSymbolCandidates([]);
+      setSymbolLookupStatus("searching");
+    }
+
     const controller = new AbortController();
     const timeoutId = window.setTimeout(async () => {
-      setSymbolLookupStatus("searching");
+      if (!immediateMatches.length) {
+        setSymbolLookupStatus("searching");
+      }
       try {
         const data = await requestJson(`/symbol/lookup?query=${encodeURIComponent(query)}`, {
           signal: controller.signal,
         });
         const matches = data.matches || data.candidates || [];
-        if (!data.matched || !matches.length) {
-          const fallbackMatches = findLocalFallbackMatches(query);
+        if (!matches.length) {
+          const fallbackMatches = immediateMatches.length ? immediateMatches : findLocalFallbackMatches(query);
           setSymbolCandidates(fallbackMatches);
           if (shouldAutoSelectSymbol(fallbackMatches)) {
             selectSymbolCandidate(fallbackMatches[0]);
@@ -1152,15 +1186,16 @@ export default function App() {
           }
           return;
         }
-        setSymbolCandidates(matches);
-        if (shouldAutoSelectSymbol(matches, data)) {
-          selectSymbolCandidate(matches[0]);
+        const mergedMatches = mergeSymbolCandidates(localMatches, matches);
+        setSymbolCandidates(mergedMatches);
+        if (shouldAutoSelectSymbol(mergedMatches, data)) {
+          selectSymbolCandidate(mergedMatches[0]);
         } else {
           setSymbolLookupStatus("candidates");
         }
       } catch (err) {
         if (!controller.signal.aborted) {
-          const fallbackMatches = findLocalFallbackMatches(query);
+          const fallbackMatches = immediateMatches.length ? immediateMatches : findLocalFallbackMatches(query);
           setSymbolCandidates(fallbackMatches);
           if (shouldAutoSelectSymbol(fallbackMatches)) {
             selectSymbolCandidate(fallbackMatches[0]);
@@ -1175,7 +1210,7 @@ export default function App() {
       controller.abort();
       window.clearTimeout(timeoutId);
     };
-  }, [companyName]);
+  }, [companyName, stockIndex]);
 
   async function runReport() {
     if (!companyName.trim()) {
