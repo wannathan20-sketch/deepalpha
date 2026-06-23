@@ -93,6 +93,7 @@ STOCK_MASTER: tuple[StockMaster, ...] = (
     StockMaster("1810.HK", "Xiaomi Corporation", "HKEX", "CN", "HKD", ("小米", "小米集团", "xiaomi", "xiaomi group", "xiacy", "1810"), 93),
     StockMaster("BIDU", "Baidu", "NASDAQ", "CN", "USD", ("百度", "baidu", "bidu"), 90),
     StockMaster("PDD", "PDD Holdings", "NASDAQ", "CN", "USD", ("拼多多", "pinduoduo", "pdd", "temu"), 90),
+    StockMaster("2513.HK", "Knowledge Atlas Technology", "HKEX", "CN", "HKD", ("智谱", "智谱AI", "智谱科技", "zhipu", "zhipu ai", "z.ai", "glm", "chatglm", "02513", "2513"), 89),
     StockMaster("9618.HK", "JD.com", "HKEX", "CN", "HKD", ("京东", "京东集团", "jd.com", "jd hk", "9618"), 90),
     StockMaster("JD", "JD.com", "NASDAQ", "CN", "USD", ("京东", "京东集团", "jd.com", "jd us", "京东美股"), 89),
     StockMaster("1024.HK", "Kuaishou Technology", "HKEX", "CN", "HKD", ("快手", "快手科技", "kuaishou", "ks", "1024"), 88),

@@ -121,3 +121,10 @@ test("public index includes dual-listed Chinese internet names", () => {
   assert.ok(results.includes("9618.HK"));
   assert.ok(results.includes("JD"));
 });
+
+test("public index includes Zhipu AI Hong Kong listing", () => {
+  const results = searchStockIndex("智谱", publicIndex);
+
+  assert.equal(results[0].symbol, "2513.HK");
+  assert.equal(results[0].ticker, "HKEX:2513");
+});

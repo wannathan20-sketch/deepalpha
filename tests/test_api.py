@@ -317,6 +317,17 @@ def test_symbol_lookup_popular_cn_semiconductor_name() -> None:
     assert data["needs_confirmation"] is True
 
 
+def test_symbol_lookup_zhipu_ai_hk_listing() -> None:
+    response = client.get("/symbol/lookup", params={"query": "智谱AI"})
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["matches"][0]["symbol"] == "2513.HK"
+    assert data["matches"][0]["exchange"] == "HKEX"
+    assert data["matches"][0]["ticker"] == "HKEX:2513"
+    assert data["matches"][0]["source"] == "alias"
+
+
 def test_market_chart_empty_symbol() -> None:
     for provider in ("auto", "yahoo"):
         response = client.get("/market/chart", params={"symbol": "   ", "provider": provider})
