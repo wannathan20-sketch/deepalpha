@@ -2,6 +2,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
 
+import requests
+
 from app.tools.market_providers import (
     AkShareProvider,
     BaostockProvider,
@@ -81,6 +83,14 @@ def _attempt(
         "reason": reason,
         "duration_ms": round((perf_counter() - started) * 1000),
     }
+
+
+def _safe_failure_reason(exc: Exception) -> str:
+    if isinstance(exc, requests.HTTPError):
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        if status_code:
+            return f"HTTP {status_code}"
+    return type(exc).__name__
 
 
 def _empty_response(
@@ -172,7 +182,7 @@ def get_market_chart(
         try:
             data = current.fetch_chart(request)
         except Exception as exc:
-            attempts.append(_attempt(name, "failed", started, type(exc).__name__))
+            attempts.append(_attempt(name, "failed", started, _safe_failure_reason(exc)))
             first_failed = first_failed or name
             continue
         points = data.get("points", [])

@@ -108,13 +108,35 @@ class YahooProvider:
 
     def fetch_chart(self, request: MarketChartRequest) -> dict:
         symbol = request.symbol.yahoo_symbol
-        response = requests.get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(symbol)}",
-            params={"range": request.range_, "interval": request.interval},
-            headers={"User-Agent": "DeepAlpha/0.1"},
-            timeout=int(os.getenv("MARKET_DATA_TIMEOUT_SECONDS", "10")),
-        )
-        response.raise_for_status()
+        hosts = [
+            host.strip()
+            for host in os.getenv(
+                "YAHOO_FINANCE_HOSTS",
+                "query1.finance.yahoo.com,query2.finance.yahoo.com",
+            ).split(",")
+            if host.strip()
+        ]
+        response = None
+        last_error = None
+        selected_host = ""
+        for host in hosts:
+            try:
+                current = requests.get(
+                    f"https://{host}/v8/finance/chart/{quote(symbol)}",
+                    params={"range": request.range_, "interval": request.interval},
+                    headers={"User-Agent": "DeepAlpha/0.1"},
+                    timeout=int(os.getenv("MARKET_DATA_TIMEOUT_SECONDS", "10")),
+                )
+                current.raise_for_status()
+                response = current
+                selected_host = host
+                break
+            except requests.RequestException as exc:
+                last_error = exc
+        if response is None:
+            if last_error is not None:
+                raise last_error
+            raise RuntimeError("No Yahoo Finance host is configured.")
         payload = response.json()
         result = (payload.get("chart", {}).get("result") or [{}])[0]
         timestamps = result.get("timestamp") or []
@@ -139,6 +161,7 @@ class YahooProvider:
             "exchange": meta.get("exchangeName", ""),
             "source_url": source_url,
             "yahoo_chart_url": source_url,
+            "yahoo_host": selected_host,
             "points": normalize_points(rows),
         }
 

@@ -45,8 +45,8 @@ def test_market_review_routes_cn_hk_us_indices(monkeypatch) -> None:
         "^DJI",
     ]
     assert calls[0][1] == "auto"
-    assert calls[4][1] == "yahoo"
-    assert calls[6][1] == "yahoo"
+    assert calls[4][1] == "auto"
+    assert calls[6][1] == "auto"
     assert review["reviews"]["cn"]["indices"][0]["change_percent"] == 10
 
 

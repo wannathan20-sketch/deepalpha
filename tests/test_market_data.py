@@ -6,6 +6,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
+import requests
 
 from app.tools.market_symbols import normalize_market_symbol
 from app.tools.market_data import get_market_chart
@@ -162,6 +163,54 @@ def test_yahoo_adapter_maps_chart_payload(monkeypatch) -> None:
     assert result["currency"] == "USD"
 
 
+def test_yahoo_adapter_falls_back_to_query2_after_query1_http_error(monkeypatch) -> None:
+    calls = []
+
+    class Response:
+        def __init__(self, status_code: int) -> None:
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                error = requests.HTTPError(f"HTTP {self.status_code}")
+                error.response = self
+                raise error
+
+        def json(self) -> dict:
+            return {
+                "chart": {
+                    "result": [{
+                        "timestamp": [1, 2],
+                        "meta": {"currency": "USD", "exchangeName": "SNP"},
+                        "indicators": {
+                            "quote": [{
+                                "open": [10, 11],
+                                "high": [12, 13],
+                                "low": [9, 10],
+                                "close": [11, 12],
+                                "volume": [100, 120],
+                            }]
+                        },
+                    }]
+                }
+            }
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        return Response(429 if "query1" in url else 200)
+
+    monkeypatch.setattr("app.tools.market_providers.requests.get", fake_get)
+
+    result = YahooProvider().fetch_chart(provider_request("^GSPC"))
+
+    assert len(result["points"]) == 2
+    assert result["yahoo_host"] == "query2.finance.yahoo.com"
+    assert [url.split("/")[2] for url in calls] == [
+        "query1.finance.yahoo.com",
+        "query2.finance.yahoo.com",
+    ]
+
+
 def test_finnhub_adapter_maps_candles(monkeypatch) -> None:
     class Response:
         def raise_for_status(self) -> None:
@@ -302,6 +351,18 @@ def test_all_provider_failures_return_stable_error(monkeypatch) -> None:
     assert result["points"] == []
     assert result["error"] == "All market data providers failed."
     assert [attempt["status"] for attempt in result["provider_attempts"]] == ["failed", "unavailable"]
+
+
+def test_http_failure_attempt_records_status_code_without_body(monkeypatch) -> None:
+    response = SimpleNamespace(status_code=429, text="secret response body")
+    error = requests.HTTPError("Too Many Requests", response=response)
+    yahoo = FakeProvider("yahoo", markets={"us"}, error=error)
+    monkeypatch.setattr("app.tools.market_data._provider_registry", lambda: {"yahoo": yahoo})
+
+    result = get_market_chart("AAPL", "auto")
+
+    assert result["provider_attempts"][0]["reason"] == "HTTP 429"
+    assert "secret response body" not in str(result)
 
 
 def test_invalid_or_duplicate_order_entries_are_ignored(monkeypatch) -> None:

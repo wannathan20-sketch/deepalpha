@@ -12,13 +12,13 @@ INDEX_GROUPS = {
         {"name": "科创50", "symbol": "000688.SH", "provider": "auto", "exchange": "SSE"},
     ],
     "hk": [
-        {"name": "恒生指数", "symbol": "^HSI", "provider": "yahoo", "exchange": "HKEX"},
-        {"name": "恒生科技指数", "symbol": "^HSTECH", "provider": "yahoo", "exchange": "HKEX"},
+        {"name": "恒生指数", "symbol": "^HSI", "provider": "auto", "exchange": "HKEX"},
+        {"name": "恒生科技指数", "symbol": "^HSTECH", "provider": "auto", "exchange": "HKEX"},
     ],
     "us": [
-        {"name": "S&P 500", "symbol": "^GSPC", "provider": "yahoo", "exchange": "US"},
-        {"name": "Nasdaq", "symbol": "^IXIC", "provider": "yahoo", "exchange": "US"},
-        {"name": "Dow", "symbol": "^DJI", "provider": "yahoo", "exchange": "US"},
+        {"name": "S&P 500", "symbol": "^GSPC", "provider": "auto", "exchange": "US"},
+        {"name": "Nasdaq", "symbol": "^IXIC", "provider": "auto", "exchange": "US"},
+        {"name": "Dow", "symbol": "^DJI", "provider": "auto", "exchange": "US"},
     ],
 }
 MARKET_LABELS = {"cn": "A 股", "hk": "港股", "us": "美股"}
