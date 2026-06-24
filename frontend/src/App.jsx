@@ -14,9 +14,11 @@ import {
   FileText,
   History,
   Loader2,
+  MessageCircle,
   Network,
   Plus,
   Play,
+  Send,
   ShieldCheck,
   Star,
   TrendingUp,
@@ -1149,6 +1151,11 @@ export default function App() {
   const [backendOnline, setBackendOnline] = useState(false);
   const [loading, setLoading] = useState("");
   const [reportTask, setReportTask] = useState(null);
+  const [reportQuestion, setReportQuestion] = useState("");
+  const [reportStrategy, setReportStrategy] = useState("general");
+  const [reportChatHistory, setReportChatHistory] = useState([]);
+  const [reportChatLoading, setReportChatLoading] = useState(false);
+  const [reportChatError, setReportChatError] = useState("");
   const [marketReview, setMarketReview] = useState(null);
   const [remoteSymbol, setRemoteSymbol] = useState(null);
   const [symbolCandidates, setSymbolCandidates] = useState([]);
@@ -1351,6 +1358,11 @@ export default function App() {
     const finalThreadId = generatedThreadId;
     setLoading("report");
     setReportTask({ status: "queued", steps: [] });
+    setReportResult(null);
+    setReportQuestion("");
+    setReportStrategy("general");
+    setReportChatHistory([]);
+    setReportChatError("");
     setError("");
     try {
       const task = await requestJson("/report/tasks", {
@@ -1400,6 +1412,56 @@ export default function App() {
       }
     } finally {
       setLoading("");
+    }
+  }
+
+  async function askReportQuestion() {
+    const question = reportQuestion.trim();
+    if (!question) {
+      setReportChatError("请输入要围绕当前报告追问的问题。");
+      return;
+    }
+    if (!reportResult?.markdown_report) {
+      setReportChatError("请先生成报告。");
+      return;
+    }
+
+    setReportChatLoading(true);
+    setReportChatError("");
+    try {
+      const payload = {
+        company_name: reportResult.company_name || selectedCompanyName,
+        question,
+        strategy: reportStrategy,
+      };
+      if (reportTask?.task_id) {
+        payload.task_id = reportTask.task_id;
+      } else {
+        payload.markdown_report = reportResult.markdown_report;
+      }
+      const answer = await requestJson("/chat/report", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setReportChatHistory((items) => [
+        ...items,
+        {
+          id: `${Date.now()}-${items.length}`,
+          question,
+          strategy: reportStrategy,
+          ...answer,
+        },
+      ]);
+      setReportQuestion("");
+    } catch (err) {
+      const message = String(err.message || "");
+      setReportChatError(
+        message.includes("503")
+          ? "模型服务暂时不可用，请稍后重试。"
+          : "报告追问失败，请确认报告上下文仍然有效。",
+      );
+    } finally {
+      setReportChatLoading(false);
     }
   }
 
@@ -1860,6 +1922,94 @@ export default function App() {
                 </button>
                 <div className="max-h-[520px] overflow-auto rounded-md border border-slate-800 bg-slate-950 p-4 text-sm leading-6 text-slate-300">
                   <MarkdownReport content={reportResult.markdown_report} />
+                </div>
+                <div className="space-y-3 rounded-md border border-cyan-400/20 bg-slate-950/80 p-4">
+                  <div className="flex items-center gap-2">
+                    <MessageCircle className="h-4 w-4 text-cyan-300" />
+                    <h3 className="text-sm font-semibold text-slate-100">继续追问</h3>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <select
+                      className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-400"
+                      value={reportStrategy}
+                      onChange={(event) => setReportStrategy(event.target.value)}
+                      disabled={reportChatLoading}
+                    >
+                      <option value="general">综合</option>
+                      <option value="risk">风险</option>
+                      <option value="valuation">估值</option>
+                      <option value="technical">技术面</option>
+                      <option value="news">新闻</option>
+                    </select>
+                    <textarea
+                      className="min-h-20 flex-1 resize-y rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-cyan-400"
+                      value={reportQuestion}
+                      onChange={(event) => setReportQuestion(event.target.value)}
+                      placeholder="例如：这份报告里最需要持续验证的风险是什么？"
+                      disabled={reportChatLoading}
+                    />
+                    <button
+                      className="inline-flex items-center justify-center gap-2 rounded-md bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
+                      onClick={askReportQuestion}
+                      type="button"
+                      disabled={reportChatLoading}
+                    >
+                      {reportChatLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                      {reportChatLoading ? "分析中" : "提问"}
+                    </button>
+                  </div>
+                  {reportChatError && (
+                    <div className="rounded-md border border-red-400/25 bg-red-400/10 px-3 py-2 text-sm text-red-100">
+                      {reportChatError}
+                    </div>
+                  )}
+                  {reportChatHistory.length > 0 && (
+                    <div className="space-y-3">
+                      {reportChatHistory.map((item) => (
+                        <article className="rounded-md border border-slate-800 bg-slate-900/80 p-3" key={item.id}>
+                          <div className="text-xs uppercase text-cyan-300">{item.strategy}</div>
+                          <div className="mt-1 text-sm font-semibold text-slate-100">问：{item.question}</div>
+                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-300">{item.answer}</p>
+                          {item.key_points?.length > 0 && (
+                            <div className="mt-3">
+                              <div className="text-xs font-semibold text-slate-400">关键要点</div>
+                              <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-slate-300">
+                                {item.key_points.map((point, index) => <li key={`${item.id}-point-${index}`}>{point}</li>)}
+                              </ul>
+                            </div>
+                          )}
+                          {item.risks?.length > 0 && (
+                            <div className="mt-3">
+                              <div className="text-xs font-semibold text-amber-300">风险</div>
+                              <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-amber-100">
+                                {item.risks.map((risk, index) => <li key={`${item.id}-risk-${index}`}>{risk}</li>)}
+                              </ul>
+                            </div>
+                          )}
+                          {item.cited_sources?.length > 0 && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {item.cited_sources.map((source) => (
+                                <a
+                                  className="rounded-md border border-cyan-300/30 px-2 py-1 text-xs text-cyan-100 hover:border-cyan-300"
+                                  href={safeReportUrl(source.url)}
+                                  key={`${item.id}-${source.url}`}
+                                  rel="noreferrer"
+                                  target="_blank"
+                                >
+                                  {source.title || source.url}
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                          {item.data_quality_warning && (
+                            <div className="mt-3 rounded-md border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
+                              {item.data_quality_warning}
+                            </div>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (

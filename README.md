@@ -173,7 +173,7 @@ OPENAI_MODEL=gpt-5
 
 - `LLM_PROVIDER` 必须是 `deepseek` 或 `openai`。
 - 对应 API Key 必须存在。
-- LLM 调用失败时报告接口返回 HTTP 503。
+- LLM 调用失败时报告与报告追问接口返回 HTTP 503。
 - mock LLM 只允许在开发和测试环境使用。
 
 ### 搜索
@@ -237,6 +237,7 @@ SEC_USER_AGENT=DeepAlpha production contact@example.com
 | `POST` | `/report` | 返回前端展示用报告 |
 | `POST` | `/report/tasks` | 创建后台报告任务 |
 | `GET` | `/report/tasks/{task_id}` | 查询后台任务状态 |
+| `POST` | `/chat/report` | 围绕已生成报告进行单次结构化追问 |
 | `GET` | `/memory/history` | 查询研究历史 |
 | `GET` / `POST` | `/memory/watchlist` | 查询或新增关注标的 |
 
@@ -263,6 +264,42 @@ curl -X POST http://127.0.0.1:8000/report/tasks \
 
 curl http://127.0.0.1:8000/report/tasks/{task_id}
 ```
+
+报告追问支持使用已完成任务的 `task_id`：
+
+```bash
+curl -X POST http://127.0.0.1:8000/chat/report \
+  -H "Content-Type: application/json" \
+  -d '{
+    "company_name": "Tesla",
+    "question": "当前报告中最需要持续验证的风险是什么？",
+    "task_id": "{task_id}",
+    "strategy": "risk"
+  }'
+```
+
+也可以直接提交报告 Markdown：
+
+```bash
+curl -X POST http://127.0.0.1:8000/chat/report \
+  -H "Content-Type: application/json" \
+  -d '{
+    "company_name": "Tesla",
+    "question": "请概括估值判断及其关键假设。",
+    "markdown_report": "# Tesla 投研报告\n...",
+    "strategy": "valuation"
+  }'
+```
+
+`strategy` 可选值为 `general`、`risk`、`valuation`、`technical`、`news`，默认为 `general`。响应固定包含：
+
+- `answer`
+- `key_points`
+- `risks`
+- `cited_sources`
+- `data_quality_warning`
+
+`task_id` 模式会使用任务保存的报告、行情画像、财务画像和来源质量；直接 Markdown 模式不会自动补抓外部数据。该接口只回答当前报告上下文，不保存服务端多轮记忆，也不声称掌握报告生成后的新闻。引用链接会限制为报告上下文中已有的来源。生产环境 LLM 调用失败、空响应或非法 JSON 均返回 HTTP 503，不使用 mock 答案兜底。
 
 ## 项目结构
 

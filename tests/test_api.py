@@ -798,6 +798,8 @@ def test_report() -> None:
     assert "markdown_report" in data
     assert "report_editor" in data
     assert "source_quality" in data
+    assert "market_profile" in data
+    assert "financial_profile" in data
     assert "citation_check" in data
     assert "trace_summary" in data
     assert "行情数据摘要" in data["markdown_report"]

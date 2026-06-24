@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ContextStatus(str, Enum):
@@ -115,6 +115,8 @@ class ReportResponse(BaseModel):
     markdown_report: str
     report_editor: dict[str, Any]
     source_quality: dict[str, Any]
+    market_profile: dict[str, Any]
+    financial_profile: dict[str, Any]
     citation_check: dict[str, Any]
     trace_summary: dict[str, Any]
 
@@ -136,3 +138,48 @@ class ReportTaskStatusResponse(BaseModel):
     steps: list[dict[str, Any]] = Field(default_factory=list)
     created_at: str | None = None
     updated_at: str | None = None
+
+
+ReportChatStrategy = Literal["general", "risk", "valuation", "technical", "news"]
+
+
+class ReportChatRequest(BaseModel):
+    company_name: str
+    question: str = Field(max_length=4000)
+    task_id: str | None = None
+    markdown_report: str | None = Field(default=None, max_length=100_000)
+    strategy: ReportChatStrategy = "general"
+
+    @field_validator("company_name", "question")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        clean = value.strip()
+        if not clean:
+            raise ValueError("must not be empty")
+        return clean
+
+    @field_validator("task_id", "markdown_report")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+    @model_validator(mode="after")
+    def validate_report_context(self):
+        if not self.task_id and not self.markdown_report:
+            raise ValueError("task_id or markdown_report is required")
+        return self
+
+
+class ReportChatCitedSource(BaseModel):
+    title: str
+    url: str
+
+
+class ReportChatResponse(BaseModel):
+    answer: str
+    key_points: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    cited_sources: list[ReportChatCitedSource] = Field(default_factory=list)
+    data_quality_warning: str

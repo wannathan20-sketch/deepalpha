@@ -29,6 +29,8 @@ from app.schemas import (
     HealthResponse,
     ReportTaskCreateResponse,
     ReportTaskStatusResponse,
+    ReportChatRequest,
+    ReportChatResponse,
     ReportResponse,
     RuntimeConfigResponse,
     SymbolResolveBatchRequest,
@@ -41,6 +43,7 @@ from app.services.market_review import build_market_review
 from app.services.market_summary import build_market_profile
 from app.services.rate_limit import rate_limit, rate_limiter
 from app.services import report_tasks
+from app.services.report_chat import answer_report_question
 from app.tools.market_data import get_market_chart
 from app.tools.symbol_lookup import lookup_symbol
 
@@ -488,6 +491,8 @@ def _build_report_response(result: dict) -> dict:
         "markdown_report": result["markdown_report"],
         "report_editor": result["report_editor"],
         "source_quality": result["team_results"].get("source_quality", {}),
+        "market_profile": result.get("market_profile", {}),
+        "financial_profile": result.get("financial_profile", {}),
         "citation_check": result["citation_check"],
         "trace_summary": {
             "trace_id": trace["trace_id"],
@@ -579,6 +584,42 @@ def get_report_task(task_id: str) -> dict:
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
+
+
+@app.post("/chat/report", response_model=ReportChatResponse)
+def report_chat(request: ReportChatRequest, http_request: Request) -> dict:
+    _require_report_access(http_request)
+    markdown_report = request.markdown_report or ""
+    market_profile = {}
+    financial_profile = {}
+    source_quality = {}
+    task_context = False
+
+    if request.task_id:
+        task = report_tasks.get_task(request.task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Report task not found")
+        if task["status"] != "success":
+            raise HTTPException(status_code=400, detail="Report task is not completed")
+        result = task.get("result") or {}
+        markdown_report = str(result.get("markdown_report") or "").strip()
+        if not markdown_report:
+            raise HTTPException(status_code=400, detail="Completed report has no context")
+        market_profile = result.get("market_profile") or {}
+        financial_profile = result.get("financial_profile") or {}
+        source_quality = result.get("source_quality") or {}
+        task_context = True
+
+    return answer_report_question(
+        company_name=request.company_name,
+        question=request.question,
+        strategy=request.strategy,
+        markdown_report=markdown_report,
+        market_profile=market_profile,
+        financial_profile=financial_profile,
+        source_quality=source_quality,
+        task_context=task_context,
+    )
 
 
 @app.get("/memory/history")
