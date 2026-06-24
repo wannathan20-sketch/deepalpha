@@ -1,12 +1,16 @@
 import json
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import ValidationError
 
-from app.errors import LLMProviderError
+from app.errors import LLMProviderError, SearchProviderError
 from app.llm import client as llm_client
-from app.schemas import ReportChatResponse, ReportChatStrategy
+from app.schemas import ReportChatResponse, ReportChatSearchMode, ReportChatStrategy
+from app.services.report_chat_routing import route_report_question
+from app.services.report_sections import parse_report_sections, validate_report_citations
+from app.tools.search import search_public_info
 
 
 MAX_REPORT_CHARS = 30_000
@@ -19,30 +23,30 @@ STRATEGY_GUIDANCE: dict[ReportChatStrategy, str] = {
     "risk": "Prioritize downside risks, triggers, missing evidence, and monitoring indicators.",
     "valuation": "Prioritize valuation assumptions, key variables, and scenario sensitivity. State clearly when valuation data is absent.",
     "technical": "Prioritize trend, moving averages, volatility, and price ranges. Never invent missing market indicators.",
-    "news": "Prioritize events already present in the report, their timing, and possible impact. Do not claim knowledge of later news.",
+    "news": "Prioritize events, timing, and impact. Distinguish saved-report evidence from newly retrieved web evidence.",
 }
 
 SYSTEM_PROMPT = (
-    "You answer investment-research follow-up questions using only the supplied report context. "
-    "Do not invent facts, sources, current events, prices, or financial metrics. "
+    "You answer investment-research follow-up questions using only the supplied report context, "
+    "conversation, and web evidence. Do not invent facts, sources, prices, or metrics. "
     "Do not give trade instructions or claim this is investment advice. "
-    "Return exactly one valid JSON object with these fields: answer (string), "
-    "key_points (array of strings), risks (array of strings), "
-    "cited_sources (array of objects with title and url), and data_quality_warning (string)."
+    "Return exactly one JSON object with answer, key_points, risks, cited_sources, "
+    "report_citations, web_citations, and data_quality_warning. "
+    "Report citations must use supplied section_id values and continuous exact excerpts. "
+    "Web citations must use supplied URLs."
 )
 
 
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _truncate(value: str, limit: int) -> str:
-    if len(value) <= limit:
-        return value
-    return f"{value[:limit]}\n[Context truncated]"
+    return value if len(value) <= limit else f"{value[:limit]}\n[Context truncated]"
 
 
 def _bounded_json(value: object, limit: int) -> str:
-    return _truncate(
-        json.dumps(value or {}, ensure_ascii=False, default=str, sort_keys=True),
-        limit,
-    )
+    return _truncate(json.dumps(value or {}, ensure_ascii=False, default=str, sort_keys=True), limit)
 
 
 def _source_entries(source_quality: object) -> list[dict[str, str]]:
@@ -73,40 +77,80 @@ def _allowed_sources(markdown_report: str, source_quality: object) -> dict[str, 
     for entry in _source_entries(source_quality):
         allowed.setdefault(entry["url"], entry["title"])
     for url in URL_PATTERN.findall(markdown_report):
-        allowed.setdefault(url.rstrip(".,;，。；"), url.rstrip(".,;，。；"))
+        clean = url.rstrip(".,;，。；")
+        allowed.setdefault(clean, clean)
     return allowed
+
+
+def _compact_history(history: list[dict]) -> list[dict]:
+    return [
+        {
+            "question": turn.get("question", ""),
+            "answer": turn.get("answer", ""),
+            "key_points": turn.get("key_points", []),
+            "risks": turn.get("risks", []),
+            "report_citation_ids": [
+                citation.get("section_id")
+                for citation in turn.get("report_citations", [])
+                if citation.get("section_id")
+            ],
+        }
+        for turn in history[-6:]
+    ]
+
+
+def _filter_web_citations(citations: list[dict], results: list[dict]) -> list[dict]:
+    by_url = {str(item.get("url") or ""): item for item in results if item.get("url")}
+    filtered = []
+    seen = set()
+    for citation in citations or []:
+        url = str(citation.get("url") or "")
+        source = by_url.get(url)
+        if source is None or url in seen:
+            continue
+        seen.add(url)
+        filtered.append(
+            {
+                "title": source.get("title") or url,
+                "url": url,
+                "published_at": source.get("published_at") or "",
+                "snippet": source.get("snippet") or "",
+            }
+        )
+    return filtered
 
 
 def _parse_response(
     raw_response: str,
     *,
     allowed_sources: dict[str, str],
+    sections: list[dict],
+    web_results: list[dict],
     default_quality_warning: str,
 ) -> dict[str, Any]:
     if not raw_response.strip():
         raise LLMProviderError("Report chat LLM returned an empty response.")
-
     try:
         payload = json.loads(raw_response)
         parsed = ReportChatResponse.model_validate(payload)
     except (json.JSONDecodeError, ValidationError, TypeError) as exc:
         raise LLMProviderError(f"Report chat LLM returned invalid JSON: {exc}") from exc
 
-    filtered_sources = []
-    seen_urls = set()
-    for source in parsed.cited_sources:
-        if source.url not in allowed_sources or source.url in seen_urls:
-            continue
-        seen_urls.add(source.url)
-        filtered_sources.append(
-            {
-                "title": source.title.strip() or allowed_sources[source.url],
-                "url": source.url,
-            }
-        )
-
     result = parsed.model_dump(mode="json")
-    result["cited_sources"] = filtered_sources
+    result["cited_sources"] = [
+        {"title": source.title.strip() or allowed_sources[source.url], "url": source.url}
+        for source in parsed.cited_sources
+        if source.url in allowed_sources
+    ]
+    result["report_citations"] = validate_report_citations(
+        result.get("report_citations", []),
+        sections,
+        allowed_urls=set(allowed_sources),
+    )
+    result["web_citations"] = _filter_web_citations(
+        result.get("web_citations", []),
+        web_results,
+    )
     if not result["data_quality_warning"].strip():
         result["data_quality_warning"] = default_quality_warning
     return result
@@ -117,44 +161,87 @@ def answer_report_question(
     company_name: str,
     question: str,
     strategy: ReportChatStrategy,
+    search_mode: ReportChatSearchMode = "auto",
     markdown_report: str,
     market_profile: dict | None = None,
     financial_profile: dict | None = None,
     source_quality: dict | None = None,
+    history: list[dict] | None = None,
     task_context: bool = False,
+    report_generated_at: str | None = None,
 ) -> dict[str, Any]:
     market_profile = market_profile or {}
     financial_profile = financial_profile or {}
     source_quality = source_quality or {}
-    context = (
-        "{\n"
-        f'  "company_name": {json.dumps(company_name, ensure_ascii=False)},\n'
-        f'  "markdown_report": {json.dumps(_truncate(markdown_report, MAX_REPORT_CHARS), ensure_ascii=False)},\n'
-        f'  "market_profile": {_bounded_json(market_profile, MAX_PROFILE_CHARS)},\n'
-        f'  "financial_profile": {_bounded_json(financial_profile, MAX_PROFILE_CHARS)},\n'
-        f'  "source_quality": {_bounded_json(source_quality, MAX_SOURCE_QUALITY_CHARS)}\n'
-        "}"
-    )
+    history = history or []
+    route = route_report_question(question, strategy, search_mode)
+    web_results: list[dict] = []
+    web_retrieved_at = None
+    search_warning = ""
+    if route["mode"] == "report_web_qa":
+        try:
+            web_results = search_public_info(
+                f"{company_name} {question} {strategy} latest",
+                limit=5,
+            )
+            route["web_status"] = "success" if web_results else "no_results"
+            web_retrieved_at = _utc_now()
+            if not web_results:
+                search_warning = "Web search returned no usable results; latest information could not be confirmed."
+        except SearchProviderError as exc:
+            route["web_status"] = "failed"
+            search_warning = f"Web search failed; latest information could not be confirmed: {exc}"
+
+    sections = parse_report_sections(markdown_report)
+    context = {
+        "company_name": company_name,
+        "report_sections": [
+            {
+                "section_id": section["section_id"],
+                "title": section["title"],
+                "content": section["content"],
+                "urls": section["urls"],
+            }
+            for section in sections
+        ],
+        "market_profile": market_profile,
+        "financial_profile": financial_profile,
+        "source_quality": source_quality,
+        "recent_conversation": _compact_history(history),
+        "web_evidence": web_results,
+    }
     prompt = (
         f"Strategy: {strategy}\n"
         f"Strategy focus: {STRATEGY_GUIDANCE[strategy]}\n"
+        f"Route: {json.dumps(route, ensure_ascii=False)}\n"
         f"Question: {question}\n\n"
-        f"Report context:\n{context}\n\n"
-        "Answer in the same language as the question. Use only evidence in the context. "
-        "When evidence is absent, say so explicitly."
+        f"Evidence context:\n{_bounded_json(context, MAX_REPORT_CHARS + MAX_PROFILE_CHARS * 2 + MAX_SOURCE_QUALITY_CHARS)}\n\n"
+        "Answer in the same language as the question. Clearly separate saved-report conclusions "
+        "from new web evidence and state conflicts or missing evidence."
     )
-    raw_response = llm_client.generate_text(
-        prompt=prompt,
-        system_prompt=SYSTEM_PROMPT,
-        max_tokens=1200,
-    )
-    default_quality_warning = (
-        "The answer is limited to the saved report and its captured profiles; later events are not included."
+    raw_response = llm_client.generate_text(prompt=prompt, system_prompt=SYSTEM_PROMPT, max_tokens=1400)
+    default_warning = (
+        "The answer is limited to the saved report and captured profiles."
         if task_context
-        else "Only the submitted Markdown report was available; structured market and financial profiles were not provided."
+        else "Only the submitted Markdown report was available; this conversation is not persisted."
     )
-    return _parse_response(
+    if search_warning:
+        default_warning = f"{default_warning} {search_warning}"
+    result = _parse_response(
         raw_response,
         allowed_sources=_allowed_sources(markdown_report, source_quality),
-        default_quality_warning=default_quality_warning,
+        sections=sections,
+        web_results=web_results,
+        default_quality_warning=default_warning,
     )
+    if search_warning and search_warning not in result["data_quality_warning"]:
+        result["data_quality_warning"] = (
+            f"{result['data_quality_warning'].strip()} {search_warning}"
+        ).strip()
+    result["route"] = route
+    result["freshness"] = {
+        "report_generated_at": report_generated_at,
+        "web_retrieved_at": web_retrieved_at,
+        "answer_cutoff": web_retrieved_at or report_generated_at,
+    }
+    return result

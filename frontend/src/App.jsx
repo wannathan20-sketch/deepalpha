@@ -30,6 +30,7 @@ const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 const DISCLAIMER_STORAGE_KEY = "deepalpha_disclaimer_accepted";
 const ACCESS_CODE_STORAGE_KEY = "deepalpha_access_code";
 const USER_ID_STORAGE_KEY = "deepalpha_user_id";
+const LAST_REPORT_TASK_STORAGE_KEY = "deepalpha_last_report_task_id";
 
 const RECOMMENDED_COMPANIES = [
   { company: "Tesla", ticker: "NASDAQ:TSLA", sector: "EV / AI" },
@@ -633,8 +634,17 @@ function renderInlineMarkdown(text, keyPrefix = "line") {
   return nodes.length ? nodes : text;
 }
 
-function MarkdownReport({ content, printMode = false }) {
+function reportSectionId(index, title) {
+  const slug = String(title)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}_]+/gu, "-")
+    .replace(/^-+|-+$/g, "") || "section";
+  return `report-section-${index}-${slug}`;
+}
+
+function MarkdownReport({ content, printMode = false, highlightedSectionId = "" }) {
   if (!content) return null;
+  let sectionIndex = 0;
 
   return (
     <div className={classNames("report-document space-y-3", printMode ? "print-report-body" : "")}>
@@ -643,15 +653,27 @@ function MarkdownReport({ content, printMode = false }) {
         const trimmedLine = line.trim();
         if (!trimmedLine) return <div className="h-1" key={key} />;
         if (/^#\s+/.test(trimmedLine)) {
+          sectionIndex += 1;
+          const sectionId = reportSectionId(sectionIndex, cleanMarkdownText(trimmedLine));
           return (
-            <h1 className="report-title" key={key}>
+            <h1
+              className={classNames("report-title scroll-mt-4", highlightedSectionId === sectionId ? "report-section-highlight" : "")}
+              id={sectionId}
+              key={key}
+            >
               {renderInlineMarkdown(cleanMarkdownText(trimmedLine), key)}
             </h1>
           );
         }
         if (/^##+\s*/.test(trimmedLine)) {
+          sectionIndex += 1;
+          const sectionId = reportSectionId(sectionIndex, cleanMarkdownText(trimmedLine));
           return (
-            <div className="report-section-heading" key={key}>
+            <div
+              className={classNames("report-section-heading scroll-mt-4", highlightedSectionId === sectionId ? "report-section-highlight" : "")}
+              id={sectionId}
+              key={key}
+            >
               <span>{renderInlineMarkdown(cleanMarkdownText(trimmedLine), key)}</span>
             </div>
           );
@@ -1153,9 +1175,11 @@ export default function App() {
   const [reportTask, setReportTask] = useState(null);
   const [reportQuestion, setReportQuestion] = useState("");
   const [reportStrategy, setReportStrategy] = useState("general");
+  const [reportSearchMode, setReportSearchMode] = useState("auto");
   const [reportChatHistory, setReportChatHistory] = useState([]);
   const [reportChatLoading, setReportChatLoading] = useState(false);
   const [reportChatError, setReportChatError] = useState("");
+  const [highlightedReportSection, setHighlightedReportSection] = useState("");
   const [marketReview, setMarketReview] = useState(null);
   const [remoteSymbol, setRemoteSymbol] = useState(null);
   const [symbolCandidates, setSymbolCandidates] = useState([]);
@@ -1262,6 +1286,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const taskId = window.localStorage.getItem(LAST_REPORT_TASK_STORAGE_KEY);
+    if (!taskId) return;
+    requestJson(`/report/tasks/${taskId}`)
+      .then((task) => {
+        if (task.status === "success" && task.result?.markdown_report) {
+          setReportTask(task);
+          setReportResult(task.result);
+        }
+      })
+      .catch(() => window.localStorage.removeItem(LAST_REPORT_TASK_STORAGE_KEY));
+  }, []);
+
+  useEffect(() => {
+    const taskId = reportTask?.task_id;
+    if (!taskId || reportTask?.status !== "success" || !reportResult?.markdown_report) return;
+    requestJson(`/chat/report/${taskId}/history`)
+      .then((data) => setReportChatHistory(data.items || []))
+      .catch(() => setReportChatError("历史追问加载失败，本次仍可继续提问。"));
+  }, [reportTask?.task_id, reportTask?.status, reportResult?.markdown_report, accessCodePromptOpen]);
+
+  useEffect(() => {
     let mounted = true;
 
     loadStockIndex()
@@ -1361,6 +1406,7 @@ export default function App() {
     setReportResult(null);
     setReportQuestion("");
     setReportStrategy("general");
+    setReportSearchMode("auto");
     setReportChatHistory([]);
     setReportChatError("");
     setError("");
@@ -1397,6 +1443,7 @@ export default function App() {
       }
 
       setReportResult(taskResult);
+      window.localStorage.setItem(LAST_REPORT_TASK_STORAGE_KEY, task.task_id);
       await loadDashboardData(companyName.trim());
     } catch (err) {
       const message = String(err.message || "");
@@ -1433,6 +1480,7 @@ export default function App() {
         company_name: reportResult.company_name || selectedCompanyName,
         question,
         strategy: reportStrategy,
+        search_mode: reportSearchMode,
       };
       if (reportTask?.task_id) {
         payload.task_id = reportTask.task_id;
@@ -1449,6 +1497,7 @@ export default function App() {
           id: `${Date.now()}-${items.length}`,
           question,
           strategy: reportStrategy,
+          search_mode: reportSearchMode,
           ...answer,
         },
       ]);
@@ -1463,6 +1512,28 @@ export default function App() {
     } finally {
       setReportChatLoading(false);
     }
+  }
+
+  async function clearReportChatHistory() {
+    const taskId = reportTask?.task_id;
+    if (!taskId) return;
+    setReportChatLoading(true);
+    setReportChatError("");
+    try {
+      await requestJson(`/chat/report/${taskId}/history`, { method: "DELETE" });
+      setReportChatHistory([]);
+    } catch (err) {
+      setReportChatError("清空追问历史失败，请稍后重试。");
+    } finally {
+      setReportChatLoading(false);
+    }
+  }
+
+  function jumpToReportCitation(sectionId) {
+    if (!sectionId) return;
+    setHighlightedReportSection(sectionId);
+    window.document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.setTimeout(() => setHighlightedReportSection(""), 2200);
   }
 
   async function addWatchlistCompany() {
@@ -1921,12 +1992,22 @@ export default function App() {
                   导出报告 PDF
                 </button>
                 <div className="max-h-[520px] overflow-auto rounded-md border border-slate-800 bg-slate-950 p-4 text-sm leading-6 text-slate-300">
-                  <MarkdownReport content={reportResult.markdown_report} />
+                  <MarkdownReport content={reportResult.markdown_report} highlightedSectionId={highlightedReportSection} />
                 </div>
                 <div className="space-y-3 rounded-md border border-cyan-400/20 bg-slate-950/80 p-4">
                   <div className="flex items-center gap-2">
                     <MessageCircle className="h-4 w-4 text-cyan-300" />
                     <h3 className="text-sm font-semibold text-slate-100">继续追问</h3>
+                    {reportChatHistory.length > 0 && (
+                      <button
+                        className="ml-auto text-xs text-slate-500 hover:text-red-200"
+                        disabled={reportChatLoading}
+                        onClick={clearReportChatHistory}
+                        type="button"
+                      >
+                        清空历史
+                      </button>
+                    )}
                   </div>
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <select
@@ -1940,6 +2021,16 @@ export default function App() {
                       <option value="valuation">估值</option>
                       <option value="technical">技术面</option>
                       <option value="news">新闻</option>
+                    </select>
+                    <select
+                      className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-400"
+                      value={reportSearchMode}
+                      onChange={(event) => setReportSearchMode(event.target.value)}
+                      disabled={reportChatLoading}
+                    >
+                      <option value="auto">自动检索</option>
+                      <option value="report_only">仅报告</option>
+                      <option value="web">联网补充</option>
                     </select>
                     <textarea
                       className="min-h-20 flex-1 resize-y rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-cyan-400"
@@ -1965,16 +2056,26 @@ export default function App() {
                   )}
                   {reportChatHistory.length > 0 && (
                     <div className="space-y-3">
-                      {reportChatHistory.map((item) => (
-                        <article className="rounded-md border border-slate-800 bg-slate-900/80 p-3" key={item.id}>
-                          <div className="text-xs uppercase text-cyan-300">{item.strategy}</div>
+                      {reportChatHistory.map((item) => {
+                        const itemKey = item.message_id || item.id || `${item.created_at}-${item.question}`;
+                        return (
+                        <article className="rounded-md border border-slate-800 bg-slate-900/80 p-3" key={itemKey}>
+                          <div className="flex flex-wrap items-center gap-2 text-xs uppercase text-cyan-300">
+                            <span>{item.strategy}</span>
+                            <span className="rounded bg-slate-800 px-2 py-0.5 text-slate-400">{item.search_mode || item.route?.mode}</span>
+                            {item.route?.web_status && item.route.web_status !== "not_requested" && (
+                              <span className={item.route.web_status === "success" ? "text-emerald-300" : "text-amber-300"}>
+                                Web: {item.route.web_status}
+                              </span>
+                            )}
+                          </div>
                           <div className="mt-1 text-sm font-semibold text-slate-100">问：{item.question}</div>
                           <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-300">{item.answer}</p>
                           {item.key_points?.length > 0 && (
                             <div className="mt-3">
                               <div className="text-xs font-semibold text-slate-400">关键要点</div>
                               <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-slate-300">
-                                {item.key_points.map((point, index) => <li key={`${item.id}-point-${index}`}>{point}</li>)}
+                                {item.key_points.map((point, index) => <li key={`${itemKey}-point-${index}`}>{point}</li>)}
                               </ul>
                             </div>
                           )}
@@ -1982,7 +2083,7 @@ export default function App() {
                             <div className="mt-3">
                               <div className="text-xs font-semibold text-amber-300">风险</div>
                               <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-amber-100">
-                                {item.risks.map((risk, index) => <li key={`${item.id}-risk-${index}`}>{risk}</li>)}
+                                {item.risks.map((risk, index) => <li key={`${itemKey}-risk-${index}`}>{risk}</li>)}
                               </ul>
                             </div>
                           )}
@@ -1992,7 +2093,7 @@ export default function App() {
                                 <a
                                   className="rounded-md border border-cyan-300/30 px-2 py-1 text-xs text-cyan-100 hover:border-cyan-300"
                                   href={safeReportUrl(source.url)}
-                                  key={`${item.id}-${source.url}`}
+                                  key={`${itemKey}-${source.url}`}
                                   rel="noreferrer"
                                   target="_blank"
                                 >
@@ -2001,13 +2102,54 @@ export default function App() {
                               ))}
                             </div>
                           )}
+                          {item.report_citations?.length > 0 && (
+                            <div className="mt-3 space-y-2">
+                              <div className="text-xs font-semibold text-cyan-300">报告证据</div>
+                              {item.report_citations.map((citation, index) => (
+                                <button
+                                  className="block w-full rounded-md border border-cyan-300/20 bg-cyan-400/5 p-2 text-left text-xs leading-5 text-slate-300 hover:border-cyan-300/50"
+                                  key={`${itemKey}-report-citation-${index}`}
+                                  onClick={() => jumpToReportCitation(citation.section_id)}
+                                  type="button"
+                                >
+                                  <span className="font-semibold text-cyan-100">{citation.section_title}</span>
+                                  <span className="mt-1 block">“{citation.excerpt}”</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {item.web_citations?.length > 0 && (
+                            <div className="mt-3 space-y-2">
+                              <div className="text-xs font-semibold text-violet-300">联网新增证据</div>
+                              {item.web_citations.map((citation) => (
+                                <a
+                                  className="block rounded-md border border-violet-300/20 bg-violet-400/5 p-2 text-xs leading-5 text-slate-300 hover:border-violet-300/50"
+                                  href={safeReportUrl(citation.url)}
+                                  key={`${itemKey}-${citation.url}`}
+                                  rel="noreferrer"
+                                  target="_blank"
+                                >
+                                  <span className="font-semibold text-violet-100">{citation.title}</span>
+                                  {citation.published_at && <span className="ml-2 text-slate-500">{citation.published_at}</span>}
+                                  {citation.snippet && <span className="mt-1 block">{citation.snippet}</span>}
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                          {(item.freshness?.report_generated_at || item.freshness?.web_retrieved_at) && (
+                            <div className="mt-3 text-[11px] leading-5 text-slate-500">
+                              报告时间：{item.freshness?.report_generated_at || "未知"}
+                              {item.freshness?.web_retrieved_at ? ` · 联网检索：${item.freshness.web_retrieved_at}` : ""}
+                            </div>
+                          )}
                           {item.data_quality_warning && (
                             <div className="mt-3 rounded-md border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
                               {item.data_quality_warning}
                             </div>
                           )}
                         </article>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

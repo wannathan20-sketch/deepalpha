@@ -1,6 +1,7 @@
 import json
 import sys
 from pathlib import Path
+from unittest.mock import ANY
 
 import pytest
 from fastapi.testclient import TestClient
@@ -104,6 +105,11 @@ def test_report_chat_uses_completed_task_context_and_filters_citations(monkeypat
             {"title": "Company filing", "url": "https://example.com/filing"}
         ],
         "data_quality_warning": "The report may not include post-report events.",
+        "message_id": ANY,
+        "route": ANY,
+        "report_citations": [],
+        "web_citations": [],
+        "freshness": ANY,
     }
     assert "321.5" in captured["prompt"]
     assert "gross_margin_percent" in captured["prompt"]
@@ -251,6 +257,7 @@ def test_report_chat_rejects_oversized_input(field: str, value: str) -> None:
 
 
 def test_report_chat_returns_503_when_llm_fails(monkeypatch) -> None:
+    _completed_task()
     def fail_generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800) -> str:
         raise LLMProviderError("LLM provider unavailable")
 
@@ -261,12 +268,13 @@ def test_report_chat_returns_503_when_llm_fails(monkeypatch) -> None:
         json={
             "company_name": "Tesla",
             "question": "What changed?",
-            "markdown_report": "# Report",
+            "task_id": "chat-task",
         },
     )
 
     assert response.status_code == 503
     assert response.json() == {"detail": "LLM provider unavailable"}
+    assert client.get("/chat/report/chat-task/history").json()["items"] == []
 
 
 def test_report_chat_returns_503_for_invalid_llm_json(monkeypatch) -> None:
@@ -286,3 +294,271 @@ def test_report_chat_returns_503_for_invalid_llm_json(monkeypatch) -> None:
 
     assert response.status_code == 503
     assert "invalid JSON" in response.json()["detail"]
+
+
+def test_temporal_question_auto_searches_and_returns_web_citations(monkeypatch) -> None:
+    _completed_task()
+    monkeypatch.setattr(
+        "app.services.report_chat.search_public_info",
+        lambda query, limit=5: [
+            {
+                "title": "Latest filing update",
+                "url": "https://example.com/latest",
+                "snippet": "A new filing was published.",
+                "published_at": "2026-06-24",
+                "provider": "tavily",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "app.llm.client.generate_text",
+        lambda **kwargs: json.dumps(
+            {
+                "answer": "A new filing was published.",
+                "key_points": [],
+                "risks": [],
+                "cited_sources": [],
+                "report_citations": [],
+                "web_citations": [{"url": "https://example.com/latest"}],
+                "data_quality_warning": "",
+            }
+        ),
+    )
+
+    response = client.post(
+        "/chat/report",
+        headers={"X-DeepAlpha-User-Id": "user-a"},
+        json={
+            "company_name": "Tesla",
+            "question": "今天有没有最新消息？",
+            "task_id": "chat-task",
+            "search_mode": "auto",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["route"]["mode"] == "report_web_qa"
+    assert response.json()["route"]["web_status"] == "success"
+    assert response.json()["web_citations"][0]["url"] == "https://example.com/latest"
+    assert response.json()["freshness"]["web_retrieved_at"]
+
+
+def test_web_search_failure_degrades_to_report_context(monkeypatch) -> None:
+    from app.errors import SearchProviderError
+
+    _completed_task()
+    monkeypatch.setattr(
+        "app.services.report_chat.search_public_info",
+        lambda query, limit=5: (_ for _ in ()).throw(SearchProviderError("search down")),
+    )
+    monkeypatch.setattr(
+        "app.llm.client.generate_text",
+        lambda **kwargs: json.dumps(
+            {
+                "answer": "Only the saved report can be confirmed.",
+                "key_points": [],
+                "risks": [],
+                "cited_sources": [],
+                "data_quality_warning": "",
+            }
+        ),
+    )
+
+    response = client.post(
+        "/chat/report",
+        headers={"X-DeepAlpha-User-Id": "user-a"},
+        json={
+            "company_name": "Tesla",
+            "question": "最新情况如何？",
+            "task_id": "chat-task",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["route"]["web_status"] == "failed"
+    assert "search down" in response.json()["data_quality_warning"]
+
+
+def test_task_chat_persists_history_and_isolates_users(monkeypatch) -> None:
+    _completed_task()
+    monkeypatch.setattr(
+        "app.llm.client.generate_text",
+        lambda **kwargs: json.dumps(
+            {
+                "answer": "Persistent answer.",
+                "key_points": [],
+                "risks": [],
+                "cited_sources": [],
+                "data_quality_warning": "",
+            }
+        ),
+    )
+
+    created = client.post(
+        "/chat/report",
+        headers={"X-DeepAlpha-User-Id": "user-a"},
+        json={
+            "company_name": "Tesla",
+            "question": "Remember this?",
+            "task_id": "chat-task",
+            "search_mode": "report_only",
+        },
+    )
+    history_a = client.get(
+        "/chat/report/chat-task/history",
+        headers={"X-DeepAlpha-User-Id": "user-a"},
+    )
+    history_b = client.get(
+        "/chat/report/chat-task/history",
+        headers={"X-DeepAlpha-User-Id": "user-b"},
+    )
+
+    assert created.status_code == 200
+    assert history_a.status_code == 200
+    assert history_a.json()["items"][0]["question"] == "Remember this?"
+    assert history_b.json()["items"] == []
+
+
+def test_history_delete_only_clears_current_user(monkeypatch) -> None:
+    _completed_task()
+    monkeypatch.setattr(
+        "app.llm.client.generate_text",
+        lambda **kwargs: json.dumps(
+            {
+                "answer": "Answer.",
+                "key_points": [],
+                "risks": [],
+                "cited_sources": [],
+                "data_quality_warning": "",
+            }
+        ),
+    )
+    for user in ("user-a", "user-b"):
+        client.post(
+            "/chat/report",
+            headers={"X-DeepAlpha-User-Id": user},
+            json={"company_name": "Tesla", "question": user, "task_id": "chat-task"},
+        )
+
+    deleted = client.delete(
+        "/chat/report/chat-task/history",
+        headers={"X-DeepAlpha-User-Id": "user-a"},
+    )
+
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+    assert client.get(
+        "/chat/report/chat-task/history",
+        headers={"X-DeepAlpha-User-Id": "user-a"},
+    ).json()["items"] == []
+    assert len(client.get(
+        "/chat/report/chat-task/history",
+        headers={"X-DeepAlpha-User-Id": "user-b"},
+    ).json()["items"]) == 1
+
+
+def test_seventh_question_prompt_contains_only_recent_six_turns(monkeypatch) -> None:
+    _completed_task()
+    prompts = []
+
+    def fake_generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800) -> str:
+        prompts.append(prompt)
+        return json.dumps(
+            {
+                "answer": "Answer.",
+                "key_points": [],
+                "risks": [],
+                "cited_sources": [],
+                "data_quality_warning": "",
+            }
+        )
+
+    monkeypatch.setattr("app.llm.client.generate_text", fake_generate_text)
+    for index in range(8):
+        response = client.post(
+            "/chat/report",
+            headers={"X-DeepAlpha-User-Id": "user-a"},
+            json={
+                "company_name": "Tesla",
+                "question": f"Question-{index}",
+                "task_id": "chat-task",
+                "search_mode": "report_only",
+            },
+        )
+        assert response.status_code == 200
+
+    assert "Question-0" not in prompts[-1]
+    assert "Question-1" in prompts[-1]
+    assert "Question-6" in prompts[-1]
+
+
+def test_direct_markdown_chat_does_not_create_history(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.llm.client.generate_text",
+        lambda **kwargs: json.dumps(
+            {
+                "answer": "Stateless.",
+                "key_points": [],
+                "risks": [],
+                "cited_sources": [],
+                "data_quality_warning": "",
+            }
+        ),
+    )
+
+    response = client.post(
+        "/chat/report",
+        headers={"X-DeepAlpha-User-Id": "user-a"},
+        json={
+            "company_name": "MarkdownCo",
+            "question": "Question",
+            "markdown_report": "# Report",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message_id"] is None
+
+
+def test_report_chat_filters_fabricated_section_citations(monkeypatch) -> None:
+    _completed_task()
+    monkeypatch.setattr(
+        "app.llm.client.generate_text",
+        lambda **kwargs: json.dumps(
+            {
+                "answer": "Answer.",
+                "key_points": [],
+                "risks": [],
+                "cited_sources": [],
+                "report_citations": [
+                    {
+                        "section_id": "report-section-1-tesla-report",
+                        "section_title": "Tesla report",
+                        "excerpt": "Revenue improved while margin risk remains.",
+                        "url": "https://example.com/filing",
+                    },
+                    {
+                        "section_id": "report-section-1-tesla-report",
+                        "section_title": "Tesla report",
+                        "excerpt": "Fabricated evidence.",
+                        "url": "",
+                    },
+                ],
+                "data_quality_warning": "",
+            }
+        ),
+    )
+
+    response = client.post(
+        "/chat/report",
+        json={
+            "company_name": "Tesla",
+            "question": "Cite the report.",
+            "task_id": "chat-task",
+            "search_mode": "report_only",
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["report_citations"]) == 1
+    assert response.json()["report_citations"][0]["excerpt"].startswith("Revenue improved")

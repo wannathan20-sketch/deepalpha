@@ -1,4 +1,6 @@
+import hashlib
 import hmac
+import time
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
@@ -30,6 +32,7 @@ from app.schemas import (
     ReportTaskCreateResponse,
     ReportTaskStatusResponse,
     ReportChatRequest,
+    ReportChatHistoryResponse,
     ReportChatResponse,
     ReportResponse,
     RuntimeConfigResponse,
@@ -44,6 +47,7 @@ from app.services.market_summary import build_market_profile
 from app.services.rate_limit import rate_limit, rate_limiter
 from app.services import report_tasks
 from app.services.report_chat import answer_report_question
+from app.services.report_chat_store import delete_history, get_history, get_recent_turns, save_turn
 from app.tools.market_data import get_market_chart
 from app.tools.symbol_lookup import lookup_symbol
 
@@ -588,12 +592,16 @@ def get_report_task(task_id: str) -> dict:
 
 @app.post("/chat/report", response_model=ReportChatResponse)
 def report_chat(request: ReportChatRequest, http_request: Request) -> dict:
-    _require_report_access(http_request)
+    started_at = time.perf_counter()
+    user_id = _require_report_access(http_request)
     markdown_report = request.markdown_report or ""
     market_profile = {}
     financial_profile = {}
     source_quality = {}
     task_context = False
+    report_generated_at = None
+    recent_turns = []
+    resolved_company_name = request.company_name
 
     if request.task_id:
         task = report_tasks.get_task(request.task_id)
@@ -602,6 +610,7 @@ def report_chat(request: ReportChatRequest, http_request: Request) -> dict:
         if task["status"] != "success":
             raise HTTPException(status_code=400, detail="Report task is not completed")
         result = task.get("result") or {}
+        resolved_company_name = str(result.get("company_name") or request.company_name)
         markdown_report = str(result.get("markdown_report") or "").strip()
         if not markdown_report:
             raise HTTPException(status_code=400, detail="Completed report has no context")
@@ -609,17 +618,60 @@ def report_chat(request: ReportChatRequest, http_request: Request) -> dict:
         financial_profile = result.get("financial_profile") or {}
         source_quality = result.get("source_quality") or {}
         task_context = True
+        report_generated_at = task.get("updated_at")
+        recent_turns = get_recent_turns(user_id, request.task_id, limit=6)
 
-    return answer_report_question(
-        company_name=request.company_name,
+    answer = answer_report_question(
+        company_name=resolved_company_name,
         question=request.question,
         strategy=request.strategy,
+        search_mode=request.search_mode,
         markdown_report=markdown_report,
         market_profile=market_profile,
         financial_profile=financial_profile,
         source_quality=source_quality,
+        history=recent_turns,
         task_context=task_context,
+        report_generated_at=report_generated_at,
     )
+    if request.task_id:
+        message_id = save_turn(
+            user_id,
+            request.task_id,
+            resolved_company_name,
+            request.question,
+            answer,
+            request.strategy,
+            request.search_mode,
+            answer["route"],
+        )
+        answer["message_id"] = message_id
+    log_event(
+        "report_chat_completed",
+        task_id=request.task_id or "",
+        user_hash=hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16],
+        strategy=request.strategy,
+        search_mode=request.search_mode,
+        route_mode=answer.get("route", {}).get("mode"),
+        web_status=answer.get("route", {}).get("web_status"),
+        history_turns=len(recent_turns),
+        report_citations=len(answer.get("report_citations", [])),
+        web_citations=len(answer.get("web_citations", [])),
+        duration_seconds=round(time.perf_counter() - started_at, 3),
+    )
+    return answer
+
+
+@app.get("/chat/report/{task_id}/history", response_model=ReportChatHistoryResponse)
+def report_chat_history(task_id: str, http_request: Request) -> dict:
+    user_id = _require_report_access(http_request)
+    return {"task_id": task_id, "items": get_history(user_id, task_id)}
+
+
+@app.delete("/chat/report/{task_id}/history")
+def report_chat_history_delete(task_id: str, http_request: Request) -> dict:
+    user_id = _require_report_access(http_request)
+    return {"task_id": task_id, "deleted": delete_history(user_id, task_id)}
 
 
 @app.get("/memory/history")

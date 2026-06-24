@@ -141,6 +141,7 @@ class ReportTaskStatusResponse(BaseModel):
 
 
 ReportChatStrategy = Literal["general", "risk", "valuation", "technical", "news"]
+ReportChatSearchMode = Literal["auto", "report_only", "web"]
 
 
 class ReportChatRequest(BaseModel):
@@ -149,6 +150,7 @@ class ReportChatRequest(BaseModel):
     task_id: str | None = None
     markdown_report: str | None = Field(default=None, max_length=100_000)
     strategy: ReportChatStrategy = "general"
+    search_mode: ReportChatSearchMode = "auto"
 
     @field_validator("company_name", "question")
     @classmethod
@@ -183,3 +185,13 @@ class ReportChatResponse(BaseModel):
     risks: list[str] = Field(default_factory=list)
     cited_sources: list[ReportChatCitedSource] = Field(default_factory=list)
     data_quality_warning: str
+    message_id: str | None = None
+    route: dict[str, Any] = Field(default_factory=dict)
+    report_citations: list[dict[str, Any]] = Field(default_factory=list)
+    web_citations: list[dict[str, Any]] = Field(default_factory=list)
+    freshness: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReportChatHistoryResponse(BaseModel):
+    task_id: str
+    items: list[dict[str, Any]] = Field(default_factory=list)

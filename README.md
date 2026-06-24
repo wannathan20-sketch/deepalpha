@@ -299,7 +299,34 @@ curl -X POST http://127.0.0.1:8000/chat/report \
 - `cited_sources`
 - `data_quality_warning`
 
-`task_id` 模式会使用任务保存的报告、行情画像、财务画像和来源质量；直接 Markdown 模式不会自动补抓外部数据。该接口只回答当前报告上下文，不保存服务端多轮记忆，也不声称掌握报告生成后的新闻。引用链接会限制为报告上下文中已有的来源。生产环境 LLM 调用失败、空响应或非法 JSON 均返回 HTTP 503，不使用 mock 答案兜底。
+`task_id` 模式会使用任务保存的报告、行情画像、财务画像和来源质量；直接 Markdown 模式保持无状态。引用链接会限制为报告上下文或本次联网检索中已有的来源。生产环境 LLM 调用失败、空响应或非法 JSON 均返回 HTTP 503，不使用 mock 答案兜底。
+
+### 报告追问 V2
+
+完成的报告任务支持按 `X-DeepAlpha-User-Id + task_id` 保存追问历史。每次回答使用最近 6 轮完整问答，刷新页面后会恢复最后一份报告及其会话；不同匿名用户之间相互隔离。直接提交 `markdown_report` 仍是无状态兼容模式。
+
+请求可通过 `search_mode` 控制联网：
+
+- `auto`：默认；“最新、今天、现在、近期、latest、today”等时效问题自动搜索。
+- `report_only`：仅使用报告、结构化画像和最近 6 轮。
+- `web`：强制联网补充。
+
+联网失败时会降级为报告问答，并在 `route.web_status` 与 `data_quality_warning` 中说明；LLM 失败仍返回 HTTP 503。回答额外包含：
+
+- `route`：确定性路由模式、时效识别和联网状态。
+- `report_citations`：经过章节 ID、连续原文摘录和 URL 白名单校验的报告证据。
+- `web_citations`：本次搜索返回且被模型实际引用的网络证据。
+- `freshness`：报告生成时间、联网检索时间和回答数据截止时间。
+
+历史接口：
+
+```bash
+curl http://127.0.0.1:8000/chat/report/{task_id}/history \
+  -H "X-DeepAlpha-User-Id: user-id"
+
+curl -X DELETE http://127.0.0.1:8000/chat/report/{task_id}/history \
+  -H "X-DeepAlpha-User-Id: user-id"
+```
 
 ## 项目结构
 

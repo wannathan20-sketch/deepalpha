@@ -91,6 +91,31 @@ def ensure_schema(connection: sqlite3.Connection | None = None) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_report_tasks_created_at
             ON report_tasks (created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS report_chat_sessions (
+            session_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            company_name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE (user_id, task_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS report_chat_messages (
+            message_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+            strategy TEXT NOT NULL,
+            search_mode TEXT NOT NULL,
+            content_json TEXT NOT NULL,
+            route_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES report_chat_sessions(session_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_report_chat_messages_session
+            ON report_chat_messages (session_id, created_at);
         """
     )
 

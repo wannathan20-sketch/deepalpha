@@ -96,6 +96,22 @@ pre {
   color: #a5f3fc;
 }
 
+.report-section-highlight {
+  animation: report-section-pulse 2.2s ease-out;
+}
+
+@keyframes report-section-pulse {
+  0%,
+  35% {
+    background: rgba(34, 211, 238, 0.22);
+    box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.12);
+  }
+  100% {
+    background: transparent;
+    box-shadow: none;
+  }
+}
+
 .print-report {
   display: none;
 }
