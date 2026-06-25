@@ -166,6 +166,73 @@ class YahooProvider:
         }
 
 
+NASDAQ_REVIEW_SYMBOLS = {
+    "^GSPC": {
+        "symbol": "SPY",
+        "asset_class": "etf",
+        "instrument_type": "etf_proxy",
+    },
+    "^IXIC": {
+        "symbol": "COMP",
+        "asset_class": "index",
+        "instrument_type": "index",
+    },
+    "^DJI": {
+        "symbol": "DIA",
+        "asset_class": "etf",
+        "instrument_type": "etf_proxy",
+    },
+}
+
+
+class NasdaqProvider:
+    name = "nasdaq"
+
+    def supports(self, market: str) -> bool:
+        return market == "us"
+
+    def is_available(self) -> bool:
+        return True
+
+    def fetch_chart(self, request: MarketChartRequest) -> dict:
+        original_symbol = request.symbol.yahoo_symbol
+        mapping = NASDAQ_REVIEW_SYMBOLS.get(original_symbol)
+        if mapping is None:
+            return {"symbol": request.symbol.local_symbol, "points": []}
+
+        symbol = mapping["symbol"]
+        asset_class = mapping["asset_class"]
+        response = requests.get(
+            f"https://api.nasdaq.com/api/quote/{quote(symbol)}/chart",
+            params={"assetclass": asset_class},
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; DeepAlpha/0.1)",
+                "Accept": "application/json, text/plain, */*",
+            },
+            timeout=int(os.getenv("MARKET_DATA_TIMEOUT_SECONDS", "10")),
+        )
+        response.raise_for_status()
+        data = response.json().get("data") or {}
+        rows = [
+            {"time": item.get("x"), "close": item.get("y")}
+            for item in data.get("chart") or []
+        ]
+        result = {
+            "symbol": symbol,
+            "exchange": "US",
+            "instrument_type": mapping["instrument_type"],
+            "source_url": (
+                f"https://www.nasdaq.com/market-activity/"
+                f"{asset_class}/{symbol.lower()}"
+            ),
+            "points": normalize_points(rows),
+        }
+        if mapping["instrument_type"] == "etf_proxy":
+            result["proxy_symbol"] = symbol
+            result["proxy_for"] = original_symbol
+        return result
+
+
 class AkShareProvider(_ImportProvider):
     name = "akshare"
     module_name = "akshare"

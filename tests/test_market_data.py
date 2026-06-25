@@ -16,6 +16,7 @@ from app.tools.market_providers import (
     EfinanceProvider,
     FinnhubProvider,
     MarketChartRequest,
+    NasdaqProvider,
     YahooProvider,
     normalize_points,
 )
@@ -111,6 +112,7 @@ def provider_request(raw_symbol: str) -> MarketChartRequest:
         (AkShareProvider(), {"cn", "hk"}),
         (EfinanceProvider(), {"cn"}),
         (BaostockProvider(), {"cn"}),
+        (NasdaqProvider(), {"us"}),
         (FinnhubProvider(), {"us"}),
     ],
 )
@@ -209,6 +211,92 @@ def test_yahoo_adapter_falls_back_to_query2_after_query1_http_error(monkeypatch)
         "query1.finance.yahoo.com",
         "query2.finance.yahoo.com",
     ]
+
+
+def test_nasdaq_adapter_maps_composite_index(monkeypatch) -> None:
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "data": {
+                    "symbol": "COMP",
+                    "company": "NASDAQ Composite Index",
+                    "chart": [
+                        {"x": 1782293458000, "y": 25607.48},
+                        {"x": 1782293518000, "y": 25613.18},
+                    ],
+                }
+            }
+
+    monkeypatch.setattr(
+        "app.tools.market_providers.requests.get",
+        lambda *args, **kwargs: Response(),
+    )
+
+    result = NasdaqProvider().fetch_chart(provider_request("^IXIC"))
+
+    assert [point["close"] for point in result["points"]] == [25607.48, 25613.18]
+    assert result["instrument_type"] == "index"
+    assert "proxy_symbol" not in result
+
+
+@pytest.mark.parametrize(
+    ("raw_symbol", "expected_symbol"),
+    [("^GSPC", "SPY"), ("^DJI", "DIA")],
+)
+def test_nasdaq_adapter_marks_etf_proxies(
+    monkeypatch,
+    raw_symbol: str,
+    expected_symbol: str,
+) -> None:
+    requested = {}
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "data": {
+                    "symbol": expected_symbol,
+                    "chart": [
+                        {"x": 1782293458000, "y": 500},
+                        {"x": 1782293518000, "y": 501},
+                    ],
+                }
+            }
+
+    def fake_get(url, **kwargs):
+        requested["url"] = url
+        requested["params"] = kwargs.get("params")
+        return Response()
+
+    monkeypatch.setattr("app.tools.market_providers.requests.get", fake_get)
+
+    result = NasdaqProvider().fetch_chart(provider_request(raw_symbol))
+
+    assert expected_symbol in requested["url"]
+    assert requested["params"] == {"assetclass": "etf"}
+    assert result["instrument_type"] == "etf_proxy"
+    assert result["proxy_symbol"] == expected_symbol
+    assert result["proxy_for"] == raw_symbol
+
+
+def test_nasdaq_adapter_returns_empty_for_unmapped_symbol(monkeypatch) -> None:
+    called = False
+
+    def fake_get(*args, **kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr("app.tools.market_providers.requests.get", fake_get)
+
+    result = NasdaqProvider().fetch_chart(provider_request("AAPL"))
+
+    assert result["points"] == []
+    assert called is False
 
 
 def test_finnhub_adapter_maps_candles(monkeypatch) -> None:
