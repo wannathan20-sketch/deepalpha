@@ -49,7 +49,7 @@ flowchart LR
 | Agent 编排 | LangGraph |
 | LLM | DeepSeek、OpenAI、开发测试 mock |
 | 检索 | Brave Search、BlockBeats、Tavily、Chroma |
-| 行情 / 市场复盘 | AkShare、Yahoo Finance、Finnhub、Efinance、Baostock |
+| 行情 / 市场复盘 | AkShare、Yahoo Finance、Nasdaq、Finnhub、Efinance、Baostock |
 | 财务 | SEC EDGAR companyfacts、AkShare |
 | 存储 | SQLite、Chroma |
 | 前端 | React、Vite、Tailwind CSS、Lucide Icons |
@@ -65,7 +65,7 @@ flowchart LR
 | --- | --- | --- |
 | A 股 | AkShare -> Efinance -> Baostock -> Yahoo | AkShare 是核心来源；Efinance、Baostock 为可选增强 |
 | 港股 | Yahoo -> AkShare | Yahoo 优先，失败后尝试 AkShare |
-| 美股 | Yahoo -> Finnhub | Finnhub 需要 `FINNHUB_API_KEY` |
+| 美股 | Yahoo -> Nasdaq -> Finnhub | Nasdaq 为无需密钥的复盘降级源；Finnhub 需要 `FINNHUB_API_KEY` |
 
 显式指定 provider 时不会自动切换到其他来源。
 
@@ -77,9 +77,9 @@ flowchart LR
 | --- | --- | --- |
 | A 股 | 上证指数、深证成指、创业板指、科创50 | 复用行情 provider 链，优先按 A 股 provider 路由；若板块表现或涨跌家数无法稳定获取，会保留为空并在 `context_status` 中标记质量 |
 | 港股 | 恒生指数、恒生科技指数 | 优先 Yahoo 指数行情；失败时保留 `provider_attempts` 和错误摘要 |
-| 美股 | S&P 500、Nasdaq、Dow | 优先 Yahoo 指数行情；Finnhub 可作为个股行情 provider，但复盘指数默认使用 Yahoo |
+| 美股 | S&P 500、Nasdaq、Dow | 优先 Yahoo；Yahoo 被限流时，Nasdaq Composite 使用 Nasdaq 官方指数数据，S&P 500 / Dow 使用 SPY / DIA ETF 代理，并通过 `instrument_type`、`proxy_symbol`、`proxy_for` 明确标记 |
 
-数据源失败时不会用 mock 代替，接口会返回 `available`、`partial`、`missing`、`fetch_failed` 或 `not_supported`。
+ETF 代理的涨跌幅可用于轻量复盘，但 ETF 收盘价不是指数点位，精确指数水平仍需结合指数行情终端复核。数据源失败时不会用 mock 代替，接口会返回 `available`、`partial`、`missing`、`fetch_failed` 或 `not_supported`。
 
 ### 财务、新闻与检索
 
