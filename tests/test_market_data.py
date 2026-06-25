@@ -441,6 +441,34 @@ def test_all_provider_failures_return_stable_error(monkeypatch) -> None:
     assert [attempt["status"] for attempt in result["provider_attempts"]] == ["failed", "unavailable"]
 
 
+def test_us_auto_router_falls_back_from_yahoo_to_nasdaq(monkeypatch) -> None:
+    yahoo = FakeProvider(
+        "yahoo",
+        markets={"us"},
+        error=requests.HTTPError("rate limited"),
+    )
+    nasdaq = FakeProvider("nasdaq", markets={"us"}, points=VALID_POINTS)
+    finnhub = FakeProvider("finnhub", markets={"us"}, available=False)
+    monkeypatch.setattr(
+        "app.tools.market_data._provider_registry",
+        lambda: {
+            "yahoo": yahoo,
+            "nasdaq": nasdaq,
+            "finnhub": finnhub,
+        },
+    )
+    monkeypatch.delenv("MARKET_DATA_PROVIDER_ORDER_US", raising=False)
+
+    result = get_market_chart("^IXIC", "auto")
+
+    assert result["provider"] == "nasdaq"
+    assert result["fallback_from"] == "yahoo"
+    assert [item["provider"] for item in result["provider_attempts"]] == [
+        "yahoo",
+        "nasdaq",
+    ]
+
+
 def test_http_failure_attempt_records_status_code_without_body(monkeypatch) -> None:
     response = SimpleNamespace(status_code=429, text="secret response body")
     error = requests.HTTPError("Too Many Requests", response=response)

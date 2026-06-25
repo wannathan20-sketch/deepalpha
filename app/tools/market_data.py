@@ -10,6 +10,7 @@ from app.tools.market_providers import (
     EfinanceProvider,
     FinnhubProvider,
     MarketChartRequest,
+    NasdaqProvider,
     YahooProvider,
 )
 from app.tools.market_symbols import normalize_market_symbol
@@ -18,7 +19,7 @@ from app.tools.market_symbols import normalize_market_symbol
 DEFAULT_PROVIDER_ORDERS = {
     "cn": ["akshare", "efinance", "baostock", "yahoo"],
     "hk": ["yahoo", "akshare"],
-    "us": ["yahoo", "finnhub"],
+    "us": ["yahoo", "nasdaq", "finnhub"],
 }
 RANGE_DAYS = {
     "1mo": 31,
@@ -37,6 +38,7 @@ def _provider_registry() -> dict:
         AkShareProvider(),
         EfinanceProvider(),
         BaostockProvider(),
+        NasdaqProvider(),
         FinnhubProvider(),
     ]
     return {provider.name: provider for provider in providers}
