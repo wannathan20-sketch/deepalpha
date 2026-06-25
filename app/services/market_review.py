@@ -48,7 +48,7 @@ def _index_from_chart(spec: dict, chart: dict) -> dict | None:
 
     latest = points[-1]
     previous = points[-2]
-    return {
+    item = {
         "name": spec["name"],
         "symbol": spec["symbol"],
         "latest_close": _round(latest.get("close"), 4),
@@ -59,7 +59,11 @@ def _index_from_chart(spec: dict, chart: dict) -> dict | None:
         "provider_mode": chart.get("provider_mode", spec["provider"]),
         "provider_attempts": chart.get("provider_attempts", []),
         "source_url": chart.get("source_url") or chart.get("yahoo_chart_url", ""),
+        "instrument_type": chart.get("instrument_type", "index"),
+        "proxy_symbol": chart.get("proxy_symbol"),
+        "proxy_for": chart.get("proxy_for"),
     }
+    return {key: value for key, value in item.items() if value is not None}
 
 
 def _market_status(indices: list[dict]) -> str:
@@ -101,6 +105,10 @@ def _summary(market: str, status: str, indices: list[dict], errors: list[str]) -
         lines.append(f"相对强势指数：{leader_text}。")
     if status == "partial":
         lines.append("部分指数或板块数据缺失，需结合交易所/行情终端复核。")
+    if any(item.get("instrument_type") == "etf_proxy" for item in indices):
+        lines.append(
+            "S&P 500、Dow 中的可用项可能采用 ETF 代理，精确指数点位请结合指数行情终端复核。"
+        )
     return lines
 
 

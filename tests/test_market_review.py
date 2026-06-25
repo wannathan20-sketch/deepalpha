@@ -74,6 +74,42 @@ def test_market_review_marks_empty_data_missing_with_attempts(monkeypatch) -> No
     assert "empty upstream" in hk["summary"][0]
 
 
+def test_market_review_exposes_etf_proxy_warning(monkeypatch) -> None:
+    from app.services.market_review import build_market_review
+
+    def fake_get_market_chart(
+        symbol,
+        provider="auto",
+        range_="1mo",
+        interval="1d",
+        exchange=None,
+    ):
+        chart = _chart(symbol, "nasdaq", 501, 500)
+        if symbol in {"^GSPC", "^DJI"}:
+            chart.update(
+                {
+                    "instrument_type": "etf_proxy",
+                    "proxy_symbol": "SPY" if symbol == "^GSPC" else "DIA",
+                    "proxy_for": symbol,
+                }
+            )
+        else:
+            chart["instrument_type"] = "index"
+        return chart
+
+    monkeypatch.setattr(
+        "app.services.market_review.get_market_chart",
+        fake_get_market_chart,
+    )
+
+    review = build_market_review("us")["reviews"]["us"]
+
+    assert review["context_status"] == "available"
+    assert review["indices"][0]["proxy_symbol"] == "SPY"
+    assert review["indices"][2]["proxy_symbol"] == "DIA"
+    assert any("ETF 代理" in line for line in review["summary"])
+
+
 def test_market_review_rejects_unknown_market() -> None:
     from app.services.market_review import build_market_review
 
