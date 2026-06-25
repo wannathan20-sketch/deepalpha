@@ -223,6 +223,9 @@ def test_nasdaq_adapter_maps_composite_index(monkeypatch) -> None:
                 "data": {
                     "symbol": "COMP",
                     "company": "NASDAQ Composite Index",
+                    "lastSalePrice": "25,476.64",
+                    "previousClose": "25,587.04",
+                    "volume": None,
                     "chart": [
                         {"x": 1782293458000, "y": 25607.48},
                         {"x": 1782293518000, "y": 25613.18},
@@ -237,7 +240,7 @@ def test_nasdaq_adapter_maps_composite_index(monkeypatch) -> None:
 
     result = NasdaqProvider().fetch_chart(provider_request("^IXIC"))
 
-    assert [point["close"] for point in result["points"]] == [25607.48, 25613.18]
+    assert [point["close"] for point in result["points"]] == [25587.04, 25476.64]
     assert result["instrument_type"] == "index"
     assert "proxy_symbol" not in result
 

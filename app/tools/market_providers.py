@@ -41,6 +41,18 @@ def _number(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _formatted_number(value: object) -> float | None:
+    if isinstance(value, str):
+        value = (
+            value.strip()
+            .replace("$", "")
+            .replace(",", "")
+            .replace("%", "")
+            .replace("+", "")
+        )
+    return _number(value)
+
+
 def _timestamp(value: object) -> int | None:
     if isinstance(value, datetime):
         current = value
@@ -213,10 +225,26 @@ class NasdaqProvider:
         )
         response.raise_for_status()
         data = response.json().get("data") or {}
-        rows = [
-            {"time": item.get("x"), "close": item.get("y")}
-            for item in data.get("chart") or []
-        ]
+        chart = data.get("chart") or []
+        latest_close = _formatted_number(data.get("lastSalePrice"))
+        previous_close = _formatted_number(data.get("previousClose"))
+        if latest_close is not None and previous_close is not None:
+            latest_timestamp = (
+                _timestamp(chart[-1].get("x")) if chart else None
+            ) or int(datetime.now(timezone.utc).timestamp())
+            rows = [
+                {"time": latest_timestamp - 86_400, "close": previous_close},
+                {
+                    "time": latest_timestamp,
+                    "close": latest_close,
+                    "volume": _formatted_number(data.get("volume")),
+                },
+            ]
+        else:
+            rows = [
+                {"time": item.get("x"), "close": item.get("y")}
+                for item in chart
+            ]
         result = {
             "symbol": symbol,
             "exchange": "US",
