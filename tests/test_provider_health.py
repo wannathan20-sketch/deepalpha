@@ -26,8 +26,10 @@ def test_provider_health_marks_market_coverage_healthy(monkeypatch) -> None:
     from app.services.provider_health import build_provider_health
 
     def fake_get_market_chart(symbol, provider="auto", range_="1mo", interval="1d", exchange=None):
-        if provider in {"nasdaq", "akshare", "yahoo"}:
+        if provider in {"nasdaq", "akshare", "akshare_hk_index"}:
             return _chart(provider, source_url=f"https://example.com/{provider}")
+        if provider == "yahoo":
+            return _chart(provider, "failed", reason="HTTP 429")
         return _chart(provider, "unavailable", reason="Provider is not configured or installed.")
 
     monkeypatch.setattr("app.services.provider_health.get_market_chart", fake_get_market_chart)
@@ -39,6 +41,8 @@ def test_provider_health_marks_market_coverage_healthy(monkeypatch) -> None:
     assert health["markets"]["us"]["healthy"] is True
     assert health["markets"]["cn"]["healthy"] is True
     assert health["markets"]["hk"]["healthy"] is True
+    hk = next(item for item in health["providers"] if item["provider"] == "akshare_hk_index")
+    assert hk["status"] == "healthy"
     nasdaq = next(item for item in health["providers"] if item["provider"] == "nasdaq")
     assert nasdaq["status"] == "healthy"
     assert nasdaq["source_url"] == "https://example.com/nasdaq"
@@ -63,4 +67,3 @@ def test_provider_health_degrades_without_coverage_and_sanitizes_reason(monkeypa
     assert all("secret-key" not in item["reason"] for item in health["providers"])
     assert all("private provider payload" not in item["reason"] for item in health["providers"])
     assert any(item["reason"] == "HTTP 500" for item in health["providers"])
-

@@ -7,6 +7,7 @@ from app.tools.market_data import get_market_chart
 
 
 PROVIDER_PROBES = [
+    {"provider": "akshare_hk_index", "market": "hk", "symbol": "^HSI", "exchange": "HKEX"},
     {"provider": "yahoo", "market": "hk", "symbol": "^HSI", "exchange": "HKEX"},
     {"provider": "nasdaq", "market": "us", "symbol": "^IXIC", "exchange": "US"},
     {"provider": "akshare", "market": "cn", "symbol": "000001.SH", "exchange": "SSE"},
@@ -126,4 +127,3 @@ def build_provider_health(ttl_seconds: int = 300) -> dict:
         "providers": providers,
         "markets": markets,
     }
-

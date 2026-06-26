@@ -12,6 +12,7 @@ CN_EXCHANGE_HINTS = {
 }
 HK_EXCHANGE_HINTS = {"HK", "HKEX", "SEHK"}
 US_EXCHANGE_HINTS = {"NASDAQ", "NYSE", "AMEX", "OTC", "US"}
+HK_INDEX_SYMBOLS = {"^HSI": "HSI", "^HSTECH": "HSTECH"}
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,18 @@ def _hk_symbol(original: str, digits: str) -> MarketSymbol:
     )
 
 
+def _hk_index_symbol(original: str, code: str) -> MarketSymbol:
+    local = code.upper().lstrip("^")
+    return MarketSymbol(
+        original_symbol=original,
+        market="hk",
+        canonical_symbol=f"HK{local}",
+        yahoo_symbol=f"^{local}",
+        local_symbol=local,
+        exchange="HK",
+    )
+
+
 def _us_symbol(original: str, ticker: str, exchange: str = "US") -> MarketSymbol:
     normalized = ticker.upper()
     return MarketSymbol(
@@ -83,6 +96,10 @@ def normalize_market_symbol(symbol: str, exchange: str | None = None) -> MarketS
         prefix, value = value.split(":", 1)
         hint = hint or prefix
 
+    if value in HK_INDEX_SYMBOLS:
+        return _hk_index_symbol(original, HK_INDEX_SYMBOLS[value])
+    if hint in HK_EXCHANGE_HINTS and value in {"HSI", "HSTECH"}:
+        return _hk_index_symbol(original, value)
     if value.startswith("HK") and value[2:].isdigit():
         return _hk_symbol(original, value[2:])
     if value.endswith(".HK") and value[:-3].isdigit():

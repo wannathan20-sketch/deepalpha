@@ -296,6 +296,47 @@ class AkShareProvider(_ImportProvider):
         }
 
 
+HK_INDEX_SYMBOLS = {
+    "^HSI": "HSI",
+    "HSI": "HSI",
+    "^HSTECH": "HSTECH",
+    "HSTECH": "HSTECH",
+}
+
+
+class AkShareHKIndexProvider(_ImportProvider):
+    name = "akshare_hk_index"
+    module_name = "akshare"
+
+    def supports(self, market: str) -> bool:
+        return market == "hk"
+
+    def fetch_chart(self, request: MarketChartRequest) -> dict:
+        ak = self._module()
+        symbol = HK_INDEX_SYMBOLS.get(request.symbol.yahoo_symbol) or HK_INDEX_SYMBOLS.get(request.symbol.local_symbol)
+        if symbol is None:
+            return {"symbol": request.symbol.local_symbol, "points": []}
+        frame = ak.stock_hk_index_daily_sina(symbol=symbol)
+        rows = [
+            {
+                "time": row.get("date") or row.get("日期"),
+                "open": row.get("open") or row.get("开盘"),
+                "high": row.get("high") or row.get("最高"),
+                "low": row.get("low") or row.get("最低"),
+                "close": row.get("close") or row.get("收盘"),
+                "volume": row.get("volume") or row.get("成交量"),
+            }
+            for row in _records(frame)
+        ]
+        return {
+            "symbol": symbol,
+            "exchange": "HK",
+            "instrument_type": "index",
+            "source_url": f"https://stock.finance.sina.com.cn/hkstock/quotes/{symbol}.html",
+            "points": normalize_points(rows),
+        }
+
+
 class EfinanceProvider(_ImportProvider):
     name = "efinance"
     module_name = "efinance"

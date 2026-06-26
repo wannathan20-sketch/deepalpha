@@ -11,6 +11,7 @@ import requests
 from app.tools.market_symbols import normalize_market_symbol
 from app.tools.market_data import get_market_chart
 from app.tools.market_providers import (
+    AkShareHKIndexProvider,
     AkShareProvider,
     BaostockProvider,
     EfinanceProvider,
@@ -30,6 +31,8 @@ from app.tools.market_providers import (
         ("920748.BJ", None, "cn", "BJ920748", "920748.BJ", "920748"),
         ("HK00700", None, "hk", "HK00700", "0700.HK", "00700"),
         ("0700.HK", None, "hk", "HK00700", "0700.HK", "00700"),
+        ("^HSI", None, "hk", "HKHSI", "^HSI", "HSI"),
+        ("^HSTECH", None, "hk", "HKHSTECH", "^HSTECH", "HSTECH"),
         ("AAPL", None, "us", "AAPL", "AAPL", "AAPL"),
         ("NASDAQ:AAPL", None, "us", "AAPL", "AAPL", "AAPL"),
         ("00700", "HKEX", "hk", "HK00700", "0700.HK", "00700"),
@@ -109,6 +112,7 @@ def provider_request(raw_symbol: str) -> MarketChartRequest:
     ("provider", "markets"),
     [
         (YahooProvider(), {"cn", "hk", "us"}),
+        (AkShareHKIndexProvider(), {"hk"}),
         (AkShareProvider(), {"cn", "hk"}),
         (EfinanceProvider(), {"cn"}),
         (BaostockProvider(), {"cn"}),
@@ -129,6 +133,48 @@ def test_akshare_adapter_maps_chinese_columns(monkeypatch) -> None:
 
     assert result["points"][0]["close"] == 11.0
     assert result["exchange"] == "SH"
+
+
+def test_akshare_hk_index_adapter_maps_hang_seng_index(monkeypatch) -> None:
+    frame = FakeFrame(
+        [
+            {"日期": "2026-01-02", "开盘": 22000, "最高": 22100, "最低": 21900, "收盘": 22050, "成交量": 100},
+            {"日期": "2026-01-03", "开盘": 22050, "最高": 22200, "最低": 22000, "收盘": 22150, "成交量": 120},
+        ]
+    )
+    captured = {}
+
+    def fake_daily(symbol: str):
+        captured["symbol"] = symbol
+        return frame
+
+    module = SimpleNamespace(stock_hk_index_daily_sina=fake_daily)
+    monkeypatch.setattr(AkShareHKIndexProvider, "_module", lambda self: module)
+
+    result = AkShareHKIndexProvider().fetch_chart(provider_request("^HSI"))
+
+    assert captured["symbol"] == "HSI"
+    assert result["symbol"] == "HSI"
+    assert result["instrument_type"] == "index"
+    assert result["source_url"] == "https://stock.finance.sina.com.cn/hkstock/quotes/HSI.html"
+    assert [point["close"] for point in result["points"]] == [22050.0, 22150.0]
+
+
+def test_akshare_hk_index_adapter_maps_hang_seng_tech(monkeypatch) -> None:
+    frame = FakeFrame([{"日期": "2026-01-02", "收盘": 4300}])
+    captured = {}
+
+    def fake_daily(symbol: str):
+        captured["symbol"] = symbol
+        return frame
+
+    module = SimpleNamespace(stock_hk_index_daily_sina=fake_daily)
+    monkeypatch.setattr(AkShareHKIndexProvider, "_module", lambda self: module)
+
+    result = AkShareHKIndexProvider().fetch_chart(provider_request("^HSTECH"))
+
+    assert captured["symbol"] == "HSTECH"
+    assert result["points"][0]["close"] == 4300.0
 
 
 def test_efinance_adapter_maps_chinese_columns(monkeypatch) -> None:
@@ -470,6 +516,28 @@ def test_us_auto_router_falls_back_from_yahoo_to_nasdaq(monkeypatch) -> None:
         "yahoo",
         "nasdaq",
     ]
+
+
+def test_hk_auto_router_prefers_akshare_index_before_yahoo(monkeypatch) -> None:
+    akshare_hk_index = FakeProvider("akshare_hk_index", markets={"hk"}, points=VALID_POINTS)
+    yahoo = FakeProvider("yahoo", markets={"hk"}, points=VALID_POINTS)
+    akshare = FakeProvider("akshare", markets={"hk"}, points=VALID_POINTS)
+    monkeypatch.setattr(
+        "app.tools.market_data._provider_registry",
+        lambda: {
+            "akshare_hk_index": akshare_hk_index,
+            "yahoo": yahoo,
+            "akshare": akshare,
+        },
+    )
+    monkeypatch.delenv("MARKET_DATA_PROVIDER_ORDER_HK", raising=False)
+
+    result = get_market_chart("^HSI", "auto")
+
+    assert result["provider"] == "akshare_hk_index"
+    assert [item["provider"] for item in result["provider_attempts"]] == ["akshare_hk_index"]
+    assert yahoo.calls == 0
+    assert akshare.calls == 0
 
 
 def test_http_failure_attempt_records_status_code_without_body(monkeypatch) -> None:

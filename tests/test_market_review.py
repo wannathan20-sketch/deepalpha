@@ -74,6 +74,32 @@ def test_market_review_marks_empty_data_missing_with_attempts(monkeypatch) -> No
     assert "empty upstream" in hk["summary"][0]
 
 
+def test_hk_market_review_recovers_when_yahoo_falls_back_to_akshare_index(monkeypatch) -> None:
+    from app.services.market_review import build_market_review
+
+    def fake_get_market_chart(symbol, provider="auto", range_="1mo", interval="1d", exchange=None):
+        chart = _chart(symbol, "akshare_hk_index", 22150, 22050)
+        chart["provider_mode"] = "auto"
+        chart["fallback_from"] = "yahoo"
+        chart["instrument_type"] = "index"
+        chart["source_url"] = f"https://stock.finance.sina.com.cn/hkstock/quotes/{symbol.strip('^')}.html"
+        chart["provider_attempts"] = [
+            {"provider": "yahoo", "status": "failed", "reason": "HTTP 429", "duration_ms": 1},
+            {"provider": "akshare_hk_index", "status": "success", "reason": "", "duration_ms": 1},
+        ]
+        return chart
+
+    monkeypatch.setattr("app.services.market_review.get_market_chart", fake_get_market_chart)
+
+    review = build_market_review("hk")
+    hk = review["reviews"]["hk"]
+
+    assert review["context_status"] == "available"
+    assert hk["context_status"] == "available"
+    assert hk["indices"][0]["provider"] == "akshare_hk_index"
+    assert hk["indices"][0]["source_url"].endswith("/HSI.html")
+
+
 def test_market_review_exposes_etf_proxy_warning(monkeypatch) -> None:
     from app.services.market_review import build_market_review
 
