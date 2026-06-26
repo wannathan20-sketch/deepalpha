@@ -24,9 +24,9 @@ import {
   TrendingUp,
   Wrench,
 } from "lucide-react";
+import { API_BASE } from "./apiClient.js";
 import { loadStockIndex, mergeSymbolCandidates, parseWatchlistImportText, searchStockIndex } from "./stockSearch.js";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 const DISCLAIMER_STORAGE_KEY = "deepalpha_disclaimer_accepted";
 const ACCESS_CODE_STORAGE_KEY = "deepalpha_access_code";
 const USER_ID_STORAGE_KEY = "deepalpha_user_id";

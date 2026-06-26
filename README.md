@@ -132,10 +132,10 @@ npm install
 npm run dev
 ```
 
-默认连接本地后端 `http://127.0.0.1:8000`。连接远程后端时，在 `frontend/.env` 中设置：
+默认连接本地后端 `http://127.0.0.1:8000`。生产域名 `https://deepalpha.best` 会默认连接 `https://api.deepalpha.best`。连接其它远程后端时，在 `frontend/.env` 中设置：
 
 ```env
-VITE_API_BASE=https://api.example.com
+VITE_API_BASE=https://api.deepalpha.best
 ```
 
 ### Watchlist 智能导入
@@ -228,7 +228,7 @@ REPORT_GLOBAL_DAILY_LIMIT=50
 
 ```env
 ENABLE_DEBUG_ROUTES=false
-CORS_ALLOW_ORIGIN_REGEX=https://your-frontend-domain.com
+CORS_ALLOW_ORIGIN_REGEX=https://(www\.)?deepalpha\.best
 SEC_USER_AGENT=DeepAlpha production contact@example.com
 ```
 
@@ -261,6 +261,21 @@ SEC_USER_AGENT=DeepAlpha production contact@example.com
 1. 在 GitHub 仓库 Secrets 中添加 `ZEABUR_TOKEN`。
 2. 在 Zeabur 控制台关闭该服务的原生 Git 自动部署，避免绕过 CI 门禁重复上线。
 3. 保持后端服务的 Zeabur project/service/environment ID 与 workflow 中配置一致。
+
+## 自定义域名
+
+推荐域名结构：
+
+- 前端：`https://deepalpha.best`
+- 后端 API：`https://api.deepalpha.best`
+
+前端生产包会在访问 `deepalpha.best` 或 `www.deepalpha.best` 时默认请求 `https://api.deepalpha.best`。如果前端部署在其它域名，请设置 `VITE_API_BASE`。
+
+后端需要在 Zeabur 绑定 `api.deepalpha.best`，并在域名服务商处添加 Zeabur 要求的 CNAME 记录。后端生产 CORS 应设置：
+
+```env
+CORS_ALLOW_ORIGIN_REGEX=https://(www\.)?deepalpha\.best
+```
 
 生成报告示例：
 
