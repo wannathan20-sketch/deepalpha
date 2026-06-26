@@ -91,7 +91,11 @@ def planner_node(state: DeepAlphaState) -> DeepAlphaState:
     """Create the research plan and seed context with recent memory.
     生成研究计划，并把近期历史投研记忆注入上下文。
     """
-    research_plan = planner.create_plan(state["company_name"])
+    research_plan = planner.create_plan(
+        state["company_name"],
+        market_profile=state.get("market_profile"),
+        financial_profile=state.get("financial_profile"),
+    )
     recent_history = [
         {
             "created_at": record.get("created_at", ""),

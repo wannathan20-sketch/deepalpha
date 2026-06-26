@@ -129,7 +129,7 @@ def generate_text(
             response_text = _generate_with_openai_compatible(
                 prompt=prompt,
                 api_key=deepseek_api_key,
-                model="deepseek-chat",
+                model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
                 base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
                 system_prompt=system_prompt,
                 max_tokens=max_tokens,

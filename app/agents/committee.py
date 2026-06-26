@@ -26,6 +26,26 @@ AGENT_ORDER = [
 
 ALLOWED_RECOMMENDATIONS = {"watchlist", "cautious", "positive", "negative"}
 
+# Per-agent weight for committee confidence calculation.
+# Core analytical agents (fundamental, financial, valuation, risk) carry more weight;
+# opinion agents (bull, bear, trader) are complementary but essential for debate quality.
+# 各 Agent 在委员会置信度中的权重：核心分析 Agent 权重更高，
+# 观点型 Agent 提供辩论质量但权重略低。
+AGENT_CONFIDENCE_WEIGHTS: dict[str, float] = {
+    "fundamental": 1.2,
+    "financial": 1.2,
+    "valuation": 1.1,
+    "risk": 1.1,
+    "industry": 0.9,
+    "technical": 0.9,
+    "news": 0.9,
+    "sentiment": 0.8,
+    "bull": 0.9,
+    "bear": 0.9,
+    "trader": 0.8,
+    "source_quality": 1.0,
+}
+
 
 def _build_context_text(agent_outputs: dict) -> str:
     lines = []
@@ -99,6 +119,27 @@ def _is_unavailable_llm_text(text: str) -> bool:
     return not normalized or "mock llm response" in normalized
 
 
+def _compute_weighted_confidence(agent_outputs: dict) -> float:
+    """Weighted committee confidence derived from each agent's self-assessed confidence.
+    基于每个 Agent 的自评置信度加权计算委员会综合置信度。
+
+    Agents that failed (confidence == 0.0 or 0.3 from safe_run_agent) pull the
+    average down naturally, signalling data gaps in the final score.
+    """
+    weighted_sum = 0.0
+    weight_sum = 0.0
+    for agent_key, weight in AGENT_CONFIDENCE_WEIGHTS.items():
+        result = agent_outputs.get(agent_key, {})
+        conf = result.get("confidence")
+        if isinstance(conf, (int, float)):
+            weighted_sum += float(conf) * weight
+            weight_sum += weight
+
+    if weight_sum == 0:
+        return 0.5
+    return round(weighted_sum / weight_sum, 2)
+
+
 def analyze(company_name: str, context: dict) -> dict:
     agent_outputs = context.get("agent_outputs", {})
     financial_profile = context.get("financial_profile", {})
@@ -155,20 +196,21 @@ def analyze(company_name: str, context: dict) -> dict:
         "后续应继续跟踪基本面、新闻事件、市场情绪和风险暴露。",
     ]
     verdict = infer_verdict(summary)
+    confidence = _compute_weighted_confidence(agent_outputs)
 
     return {
         "agent": "committee",
         "verdict": verdict,
         "summary": summary,
         "key_points": key_points,
-        "claims": build_claims(key_points, confidence=0.79),
+        "claims": build_claims(key_points, confidence=confidence),
         "risks": [
         "结论依赖当前可得来源，仍需用最新公告、财报和行情复核。",
         "财务和估值模型仍可能缺少关键输入，不宜将结论直接用于投资决策。",
         ],
         "watch_items": ["最新财报", "估值倍数", "核心业务增速", "竞争补贴强度", "股价关键位"],
         "data_quality": build_data_quality(warnings=["委员会结论仍需正式财报、估值数据库和可比公司样本复核。"]),
-        "confidence": 0.79,
+        "confidence": confidence,
         "recommendation": recommendation,
         "sources_count": sources_count,
         "financial_profile": financial_profile,

@@ -102,7 +102,7 @@ def get_runtime_config() -> dict:
     brave_search_api_key = os.getenv("BRAVE_SEARCH_API_KEY", "")
     blockbeats_api_key = os.getenv("BLOCKBEATS_API_KEY", "")
     rag_embedding_provider = os.getenv("RAG_EMBEDDING_PROVIDER", "hash").lower()
-    llm_model = "deepseek-chat" if llm_provider == "deepseek" else openai_model
+    llm_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat") if llm_provider == "deepseek" else openai_model
     llm_enabled = (
         (llm_provider == "openai" and bool(openai_api_key))
         or (llm_provider == "deepseek" and bool(deepseek_api_key))
