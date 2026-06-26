@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { resolveApiBase } from "./apiClient.js";
+import { formatApiErrorMessage, resolveApiBase } from "./apiClient.js";
 
 
 test("explicit VITE_API_BASE wins over hostname defaults", () => {
@@ -38,3 +38,10 @@ test("local development defaults to the local FastAPI backend", () => {
   );
 });
 
+
+test("formats backend detail in HTTP errors", () => {
+  assert.equal(
+    formatApiErrorMessage(503, { detail: "deepseek LLM request failed" }),
+    "HTTP 503: deepseek LLM request failed",
+  );
+});

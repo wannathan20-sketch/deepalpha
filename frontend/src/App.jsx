@@ -24,7 +24,7 @@ import {
   TrendingUp,
   Wrench,
 } from "lucide-react";
-import { API_BASE } from "./apiClient.js";
+import { API_BASE, formatApiErrorMessage } from "./apiClient.js";
 import { loadStockIndex, mergeSymbolCandidates, parseWatchlistImportText, searchStockIndex } from "./stockSearch.js";
 
 const DISCLAIMER_STORAGE_KEY = "deepalpha_disclaimer_accepted";
@@ -209,7 +209,13 @@ async function requestJson(path, options = {}) {
   });
 
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    let errorPayload = {};
+    try {
+      errorPayload = await response.clone().json();
+    } catch (err) {
+      errorPayload = {};
+    }
+    throw new Error(formatApiErrorMessage(response.status, errorPayload));
   }
 
   return response.json();
@@ -1534,10 +1540,13 @@ export default function App() {
       setReportQuestion("");
     } catch (err) {
       const message = String(err.message || "");
+      const detail = message.replace(/^HTTP \d+:\s*/, "");
       setReportChatError(
-        message.includes("503")
-          ? "模型服务暂时不可用，请稍后重试。"
-          : "报告追问失败，请确认报告上下文仍然有效。",
+        message.startsWith("HTTP 503:")
+          ? `模型服务暂时不可用：${detail}`
+          : message.startsWith("HTTP ")
+            ? `报告追问失败：${detail || message}`
+            : "报告追问失败，请确认报告上下文仍然有效。",
       );
     } finally {
       setReportChatLoading(false);

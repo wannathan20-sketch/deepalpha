@@ -219,7 +219,7 @@ def answer_report_question(
         "Answer in the same language as the question. Clearly separate saved-report conclusions "
         "from new web evidence and state conflicts or missing evidence."
     )
-    raw_response = llm_client.generate_text(prompt=prompt, system_prompt=SYSTEM_PROMPT, max_tokens=1400)
+    raw_response = llm_client.generate_text(prompt=prompt, system_prompt=SYSTEM_PROMPT, max_tokens=1400, json_mode=True)
     default_warning = (
         "The answer is limited to the saved report and captured profiles."
         if task_context

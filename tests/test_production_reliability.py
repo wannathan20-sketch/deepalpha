@@ -101,6 +101,44 @@ def test_development_mock_llm_remains_available(monkeypatch) -> None:
     assert "Mock LLM response" in generate_text("test prompt")
 
 
+def test_json_mode_forwards_to_the_provider(monkeypatch) -> None:
+    from app.llm.client import generate_text
+
+    captured = {}
+
+    def fake_generate(**kwargs):
+        captured.update(kwargs)
+        return '{"answer":"ok"}'
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "llm-key")
+    monkeypatch.setattr("app.llm.client._generate_with_openai_compatible", fake_generate)
+
+    generate_text("Question: risk?", json_mode=True)
+
+    assert captured["json_mode"] is True
+
+
+def test_json_mode_defaults_to_false(monkeypatch) -> None:
+    from app.llm.client import generate_text
+
+    captured = {}
+
+    def fake_generate(**kwargs):
+        captured.update(kwargs)
+        return "plain text response"
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "llm-key")
+    monkeypatch.setattr("app.llm.client._generate_with_openai_compatible", fake_generate)
+
+    generate_text("Question: risk?")
+
+    assert captured["json_mode"] is False
+
+
 def test_safe_agent_runner_propagates_llm_provider_errors() -> None:
     from app.errors import LLMProviderError
     from app.utils import safe_run_agent

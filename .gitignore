@@ -18,3 +18,5 @@ frontend/dist/
 .venv/
 venv/
 .vercel
+DeepAlpha_*.md
+.playwright-cli/

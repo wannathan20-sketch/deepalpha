@@ -16,8 +16,13 @@ export function resolveApiBase({ envApiBase = "", hostname = "" } = {}) {
 }
 
 
+export function formatApiErrorMessage(status, payload = {}) {
+  const detail = typeof payload?.detail === "string" ? payload.detail.trim() : "";
+  return detail ? `HTTP ${status}: ${detail}` : `HTTP ${status}`;
+}
+
+
 export const API_BASE = resolveApiBase({
   envApiBase: import.meta.env?.VITE_API_BASE,
   hostname: typeof window === "undefined" ? "" : window.location.hostname,
 });
-

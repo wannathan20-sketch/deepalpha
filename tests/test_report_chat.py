@@ -68,7 +68,7 @@ def test_report_chat_uses_completed_task_context_and_filters_citations(monkeypat
     _completed_task()
     captured = {}
 
-    def fake_generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800) -> str:
+    def fake_generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800, json_mode: bool = False) -> str:
         captured["prompt"] = prompt
         captured["system_prompt"] = system_prompt
         return json.dumps(
@@ -121,7 +121,7 @@ def test_report_chat_uses_completed_task_context_and_filters_citations(monkeypat
 def test_report_chat_accepts_direct_markdown(monkeypatch) -> None:
     captured = {}
 
-    def fake_generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800) -> str:
+    def fake_generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800, json_mode: bool = False) -> str:
         captured["prompt"] = prompt
         return json.dumps(
             {
@@ -194,7 +194,7 @@ def test_report_chat_rejects_unfinished_task() -> None:
 def test_report_chat_supports_strategy_focus(monkeypatch, strategy: str) -> None:
     prompts = []
 
-    def fake_generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800) -> str:
+    def fake_generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800, json_mode: bool = False) -> str:
         prompts.append(prompt)
         return json.dumps(
             {
@@ -258,7 +258,7 @@ def test_report_chat_rejects_oversized_input(field: str, value: str) -> None:
 
 def test_report_chat_returns_503_when_llm_fails(monkeypatch) -> None:
     _completed_task()
-    def fail_generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800) -> str:
+    def fail_generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800, json_mode: bool = False) -> str:
         raise LLMProviderError("LLM provider unavailable")
 
     monkeypatch.setattr("app.llm.client.generate_text", fail_generate_text)
@@ -280,7 +280,7 @@ def test_report_chat_returns_503_when_llm_fails(monkeypatch) -> None:
 def test_report_chat_returns_503_for_invalid_llm_json(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.llm.client.generate_text",
-        lambda prompt, system_prompt="", max_tokens=800: "not-json",
+        lambda **kwargs: "not-json",
     )
 
     response = client.post(
@@ -294,6 +294,32 @@ def test_report_chat_returns_503_for_invalid_llm_json(monkeypatch) -> None:
 
     assert response.status_code == 503
     assert "invalid JSON" in response.json()["detail"]
+
+
+def test_report_chat_uses_structured_development_fallback_when_provider_fails(monkeypatch) -> None:
+    _completed_task()
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "app.llm.client._generate_with_openai_compatible",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("provider down")),
+    )
+
+    response = client.post(
+        "/chat/report",
+        json={
+            "company_name": "Tesla",
+            "question": "继续追问一下风险",
+            "task_id": "chat-task",
+            "search_mode": "report_only",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["answer"]
+    assert response.json()["data_quality_warning"]
+    assert response.json()["message_id"]
 
 
 def test_temporal_question_auto_searches_and_returns_web_citations(monkeypatch) -> None:
@@ -461,7 +487,7 @@ def test_seventh_question_prompt_contains_only_recent_six_turns(monkeypatch) -> 
     _completed_task()
     prompts = []
 
-    def fake_generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800) -> str:
+    def fake_generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800, json_mode: bool = False) -> str:
         prompts.append(prompt)
         return json.dumps(
             {
