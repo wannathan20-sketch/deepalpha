@@ -39,6 +39,10 @@ services:
         value: 86400
       - key: MARKET_CACHE_TTL_SECONDS
         value: 300
+      - key: MARKET_REVIEW_CACHE_TTL_SECONDS
+        value: 300
+      - key: PROVIDER_HEALTH_CACHE_TTL_SECONDS
+        value: 300
       - key: MARKET_DATA_PROVIDER_ORDER_US
         value: yahoo,nasdaq,finnhub
       - key: YAHOO_FINANCE_HOSTS

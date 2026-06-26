@@ -51,8 +51,48 @@ def test_config() -> None:
     assert "search_provider" in data
     assert "search_enabled" in data
     assert "debug_routes_enabled" in data
+    assert "market_review_cache_ttl_seconds" in data
+    assert "provider_health_cache_ttl_seconds" in data
     assert "OPENAI_API_KEY" not in data
     assert "TAVILY_API_KEY" not in data
+
+
+def test_provider_health_endpoint_uses_cache(monkeypatch) -> None:
+    calls = []
+
+    def fake_build_provider_health(ttl_seconds: int = 300) -> dict:
+        calls.append(ttl_seconds)
+        return {
+            "status": "ok",
+            "checked_at": "2026-06-26T00:00:00+00:00",
+            "ttl_seconds": ttl_seconds,
+            "providers": [
+                {
+                    "provider": "nasdaq",
+                    "market": "us",
+                    "symbol": "^IXIC",
+                    "status": "healthy",
+                    "latency_ms": 1,
+                    "reason": "",
+                    "source_url": "https://example.com/nasdaq",
+                    "checked_at": "2026-06-26T00:00:00+00:00",
+                }
+            ],
+            "markets": {"us": {"healthy": True, "healthy_providers": ["nasdaq"]}},
+        }
+
+    monkeypatch.setenv("PROVIDER_HEALTH_CACHE_TTL_SECONDS", "123")
+    monkeypatch.setattr("app.main.build_provider_health", fake_build_provider_health, raising=False)
+
+    first = client.get("/health/providers")
+    second = client.get("/health/providers")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["cache_hit"] is False
+    assert second.json()["cache_hit"] is True
+    assert first.json()["ttl_seconds"] == 123
+    assert len(calls) == 1
 
 
 def test_debug_architecture() -> None:

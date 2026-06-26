@@ -55,6 +55,8 @@ class RuntimeConfigResponse(BaseModel):
     search_provider: str
     search_enabled: bool
     debug_routes_enabled: bool
+    market_review_cache_ttl_seconds: int | None = None
+    provider_health_cache_ttl_seconds: int | None = None
 
 
 class AnalyzeRequest(BaseModel):

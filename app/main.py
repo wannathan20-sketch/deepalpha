@@ -44,6 +44,7 @@ from app.services.financials import build_financial_profile
 from app.services.logging import log_event
 from app.services.market_review import build_market_review
 from app.services.market_summary import build_market_profile
+from app.services.provider_health import build_provider_health
 from app.services.rate_limit import rate_limit, rate_limiter
 from app.services import report_tasks
 from app.services.report_chat import answer_report_question
@@ -127,6 +128,17 @@ def _enforce_report_generation_limits(request: Request) -> None:
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(status="ok")
+
+
+@app.get("/health/providers")
+def health_providers() -> dict:
+    ttl_seconds = get_int_env("PROVIDER_HEALTH_CACHE_TTL_SECONDS", 300)
+    data, cache_hit = cache.get_or_set(
+        "provider-health",
+        ttl_seconds,
+        lambda: build_provider_health(ttl_seconds=ttl_seconds),
+    )
+    return {**data, "cache_hit": cache_hit}
 
 
 @app.get("/config", response_model=RuntimeConfigResponse)

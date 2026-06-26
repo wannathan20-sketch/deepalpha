@@ -79,7 +79,17 @@ flowchart LR
 | 港股 | 恒生指数、恒生科技指数 | 优先 Yahoo 指数行情；失败时保留 `provider_attempts` 和错误摘要 |
 | 美股 | S&P 500、Nasdaq、Dow | 优先 Yahoo；Yahoo 被限流时，Nasdaq Composite 使用 Nasdaq 官方指数数据，S&P 500 / Dow 使用 SPY / DIA ETF 代理，并通过 `instrument_type`、`proxy_symbol`、`proxy_for` 明确标记 |
 
-ETF 代理的涨跌幅可用于轻量复盘，但 ETF 收盘价不是指数点位，精确指数水平仍需结合指数行情终端复核。数据源失败时不会用 mock 代替，接口会返回 `available`、`partial`、`missing`、`fetch_failed` 或 `not_supported`。
+ETF 代理的涨跌幅可用于轻量复盘，但 ETF 收盘价不是指数点位，精确指数水平仍需结合指数行情终端复核。数据源失败时不会用 mock 代替，接口会返回 `available`、`partial`、`missing`、`fetch_failed` 或 `not_supported`。接口默认通过 `MARKET_REVIEW_CACHE_TTL_SECONDS=300` 缓存 5 分钟，并返回 `cache_hit` 与 `generated_at`，前端会展示 provider、来源链接、直接指数/ETF 代理标识。
+
+### 数据源健康
+
+`GET /health/providers` 会主动探测 Yahoo、Nasdaq、AkShare、Efinance、Baostock、Finnhub，并返回脱敏后的 provider 状态、耗时、覆盖市场和来源链接。默认通过 `PROVIDER_HEALTH_CACHE_TTL_SECONDS=300` 缓存 5 分钟；不会返回 API Key、环境变量、异常正文或 provider 原始响应。
+
+返回的顶层 `status` 含义：
+
+- `ok`：A 股、港股、美股至少各有一个可用 provider。
+- `degraded`：只有部分市场有可用 provider。
+- `unavailable`：核心市场都没有可用 provider。
 
 ### 财务、新闻与检索
 
@@ -229,6 +239,7 @@ SEC_USER_AGENT=DeepAlpha production contact@example.com
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | `GET` | `/health` | 健康检查 |
+| `GET` | `/health/providers` | 脱敏数据源健康检查 |
 | `GET` | `/config` | 查看运行配置，不返回密钥 |
 | `GET` | `/symbol/lookup` | 根据公司名或代码查询候选证券 |
 | `GET` | `/market/chart` | 获取行情和 provider 降级信息 |
@@ -240,6 +251,16 @@ SEC_USER_AGENT=DeepAlpha production contact@example.com
 | `POST` | `/chat/report` | 围绕已生成报告进行单次结构化追问 |
 | `GET` | `/memory/history` | 查询研究历史 |
 | `GET` / `POST` | `/memory/watchlist` | 查询或新增关注标的 |
+
+## CI 全绿后部署 Zeabur
+
+仓库包含 `.github/workflows/deploy.yml`。它只会在 `main` 分支的 `CI` workflow 成功完成后运行，部署被 CI 验证过的同一个 commit 到 Zeabur 后端服务，并对 `/health` 做冒烟测试。
+
+启用前需要：
+
+1. 在 GitHub 仓库 Secrets 中添加 `ZEABUR_TOKEN`。
+2. 在 Zeabur 控制台关闭该服务的原生 Git 自动部署，避免绕过 CI 门禁重复上线。
+3. 保持后端服务的 Zeabur project/service/environment ID 与 workflow 中配置一致。
 
 生成报告示例：
 

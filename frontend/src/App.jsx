@@ -440,50 +440,80 @@ function MarketReviewPanel({ review }) {
   }
 
   return (
-    <div className="grid gap-3 lg:grid-cols-3">
-      {markets.map(([market, label]) => {
-        const item = reviews[market];
-        const indices = item?.indices || [];
-        const summary = item?.summary || [];
-        return (
-          <div className="rounded-md border border-slate-800 bg-slate-950/70 p-3" key={market}>
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <div className="text-sm font-semibold text-slate-100">{label}</div>
-              <span
-                className={classNames(
-                  "rounded-md border px-2 py-1 text-[11px]",
-                  item?.context_status === "available"
-                    ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100"
-                    : "border-amber-400/25 bg-amber-400/10 text-amber-100",
-                )}
-              >
-                {item?.context_status || "missing"}
-              </span>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+        <span>{review.cache_hit ? "缓存命中" : "实时拉取"}</span>
+        {review.generated_at && <span>生成时间 {new Date(review.generated_at).toLocaleString()}</span>}
+      </div>
+      <div className="grid gap-3 lg:grid-cols-3">
+        {markets.map(([market, label]) => {
+          const item = reviews[market];
+          const indices = item?.indices || [];
+          const summary = item?.summary || [];
+          return (
+            <div className="rounded-md border border-slate-800 bg-slate-950/70 p-3" key={market}>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-slate-100">{label}</div>
+                <span
+                  className={classNames(
+                    "rounded-md border px-2 py-1 text-[11px]",
+                    item?.context_status === "available"
+                      ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100"
+                      : "border-amber-400/25 bg-amber-400/10 text-amber-100",
+                  )}
+                >
+                  {item?.context_status || "missing"}
+                </span>
+              </div>
+              <div className="min-h-10 space-y-1 text-xs leading-5 text-slate-400">
+                {(summary.length ? summary : ["暂无复盘数据。"]).map((line, index) => (
+                  <p key={`${market}-summary-${index}`}>{line}</p>
+                ))}
+              </div>
+              <div className="mt-3 space-y-2">
+                {indices.slice(0, 3).map((index) => (
+                  <div className="space-y-1 rounded-md border border-slate-800/70 bg-slate-900/40 p-2 text-xs" key={index.symbol}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-slate-300">{index.name}</span>
+                      <span
+                        className={classNames(
+                          "font-mono",
+                          Number(index.change_percent) > 0
+                            ? "text-emerald-200"
+                            : Number(index.change_percent) < 0
+                              ? "text-red-200"
+                              : "text-slate-400",
+                        )}
+                      >
+                        {formatPercent(index.change_percent)}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
+                      {index.provider && <span className="rounded border border-slate-700 px-1.5 py-0.5">provider: {index.provider}</span>}
+                      <span className="rounded border border-slate-700 px-1.5 py-0.5">
+                        {index.instrument_type === "etf_proxy"
+                          ? `ETF代理 ${index.proxy_symbol || ""}`.trim()
+                          : "直接指数"}
+                      </span>
+                      {index.source_url && (
+                        <a
+                          className="rounded border border-cyan-400/25 px-1.5 py-0.5 text-cyan-200 hover:border-cyan-300"
+                          href={index.source_url}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          来源
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {!indices.length && <div className="text-xs text-slate-500">指数数据暂缺。</div>}
+              </div>
             </div>
-            <p className="min-h-10 text-xs leading-5 text-slate-400">{summary[0] || "暂无复盘数据。"}</p>
-            <div className="mt-3 space-y-2">
-              {indices.slice(0, 3).map((index) => (
-                <div className="flex items-center justify-between gap-2 text-xs" key={index.symbol}>
-                  <span className="truncate text-slate-300">{index.name}</span>
-                  <span
-                    className={classNames(
-                      "font-mono",
-                      Number(index.change_percent) > 0
-                        ? "text-emerald-200"
-                        : Number(index.change_percent) < 0
-                          ? "text-red-200"
-                          : "text-slate-400",
-                    )}
-                  >
-                    {formatPercent(index.change_percent)}
-                  </span>
-                </div>
-              ))}
-              {!indices.length && <div className="text-xs text-slate-500">指数数据暂缺。</div>}
-            </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -130,6 +130,8 @@ def get_runtime_config() -> dict:
         "debug_routes_enabled": debug_routes_enabled(),
         "symbol_cache_ttl_seconds": get_int_env("SYMBOL_CACHE_TTL_SECONDS", 86400),
         "market_cache_ttl_seconds": get_int_env("MARKET_CACHE_TTL_SECONDS", 300),
+        "market_review_cache_ttl_seconds": get_int_env("MARKET_REVIEW_CACHE_TTL_SECONDS", 300),
+        "provider_health_cache_ttl_seconds": get_int_env("PROVIDER_HEALTH_CACHE_TTL_SECONDS", 300),
         "financials_cache_ttl_seconds": get_int_env("FINANCIALS_CACHE_TTL_SECONDS", 21600),
         "access_code_required": bool(get_access_code()),
         "financials_rate_limit": get_int_env("FINANCIALS_RATE_LIMIT", 60),

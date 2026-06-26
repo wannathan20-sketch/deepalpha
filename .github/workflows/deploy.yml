@@ -1,0 +1,86 @@
+name: Deploy Backend
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+concurrency:
+  group: zeabur-backend-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    env:
+      ZEABUR_PROJECT_ID: 6a1e814b8fd5d6b81d7ad706
+      ZEABUR_SERVICE_ID: 6a1e8248d8f8814aa285d8a6
+      ZEABUR_ENVIRONMENT_ID: 6a1e814bb0fc054c4cc406d0
+      BACKEND_HEALTH_URL: https://deepalpha.zeabur.app/health
+      TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify Zeabur token
+        env:
+          ZEABUR_TOKEN: ${{ secrets.ZEABUR_TOKEN }}
+        run: |
+          test -n "$ZEABUR_TOKEN"
+
+      - name: Authenticate Zeabur
+        env:
+          ZEABUR_TOKEN: ${{ secrets.ZEABUR_TOKEN }}
+        run: |
+          npx --yes zeabur@latest auth login --token "$ZEABUR_TOKEN" -i=false
+
+      - name: Deploy backend service
+        run: |
+          npx --yes zeabur@latest deploy \
+            --project-id "$ZEABUR_PROJECT_ID" \
+            --service-id "$ZEABUR_SERVICE_ID" \
+            --environment-id "$ZEABUR_ENVIRONMENT_ID" \
+            -i=false
+
+      - name: Wait for Zeabur deployment to run
+        run: |
+          for attempt in $(seq 1 30); do
+            deployments="$(npx --yes zeabur@latest deployment list \
+              --service-id "$ZEABUR_SERVICE_ID" \
+              --env-id "$ZEABUR_ENVIRONMENT_ID" \
+              --json \
+              -i=false)"
+            status="$(echo "$deployments" | jq -r --arg sha "$TESTED_SHA" '(([.[] | select(.commitSHA == $sha)][0] // .[0] // {}) | .status // "UNKNOWN")')"
+            echo "Latest Zeabur deployment status: $status"
+            if [ "$status" = "RUNNING" ]; then
+              exit 0
+            fi
+            if [ "$status" = "FAILED" ] || [ "$status" = "CANCELED" ]; then
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "Zeabur deployment did not reach RUNNING."
+          exit 1
+
+      - name: Smoke check backend health
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS "$BACKEND_HEALTH_URL"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Backend health check did not pass after deploy."
+          exit 1
