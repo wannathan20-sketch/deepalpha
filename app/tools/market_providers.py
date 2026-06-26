@@ -408,6 +408,50 @@ class BaostockProvider(_ImportProvider):
         }
 
 
+class YFinanceProvider(_ImportProvider):
+    """Thin wrapper around `yfinance`, which accesses Yahoo Finance through
+    a different internal endpoint than the direct v8/chart API.  It is more
+    resilient from cloud IP ranges where the v8 API may be rate-limited.
+    封装 yfinance，相比直接调 Yahoo v8 API，yfinance 对云服务器 IP 更宽容，
+    可作为美股和港股的可靠兜底。
+    """
+    name = "yfinance"
+    module_name = "yfinance"
+
+    def supports(self, market: str) -> bool:
+        return market in {"us", "hk", "cn"}
+
+    def fetch_chart(self, request: MarketChartRequest) -> dict:
+        yf = self._module()
+        ticker = yf.Ticker(request.symbol.yahoo_symbol)
+        hist = ticker.history(
+            period="1y" if request.range_ in {"1y", "2y", "5y", "max"} else "6mo",
+        )
+        if hist.empty:
+            return {"symbol": request.symbol.local_symbol, "points": []}
+        rows = []
+        for index, row in hist.iterrows():
+            rows.append(
+                {
+                    "time": int(index.timestamp()),
+                    "open": _number(row.get("Open")),
+                    "high": _number(row.get("High")),
+                    "low": _number(row.get("Low")),
+                    "close": _number(row.get("Close")),
+                    "volume": _number(row.get("Volume")),
+                }
+            )
+        return {
+            "symbol": request.symbol.local_symbol,
+            "exchange": request.symbol.exchange,
+            "source_url": (
+                f"https://finance.yahoo.com/quote/"
+                f"{request.symbol.yahoo_symbol}/"
+            ),
+            "points": normalize_points(rows),
+        }
+
+
 class FinnhubProvider:
     name = "finnhub"
 
