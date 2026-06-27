@@ -132,6 +132,20 @@ def _parse_response(
         raise LLMProviderError("Report chat LLM returned an empty response.")
     try:
         payload = json.loads(raw_response)
+        # Some LLMs (e.g. DeepSeek without response_format) return
+        # cited_sources as plain strings (section IDs).  Normalize them
+        # into objects so Pydantic validation does not reject the entire
+        # response.  Strings with empty URLs are dropped later by the
+        # allowed_sources filter.
+        # 部分模型（如未启用 response_format 的 DeepSeek）会把
+        # cited_sources 输出为字符串列表。此处将字符串统一转为对象，
+        # 后续 allowed_sources 过滤会自动移除无 URL 的条目。
+        raw_cited = payload.get("cited_sources")
+        if isinstance(raw_cited, list):
+            payload["cited_sources"] = [
+                {"title": item, "url": ""} if isinstance(item, str) else item
+                for item in raw_cited
+            ]
         parsed = ReportChatResponse.model_validate(payload)
     except (json.JSONDecodeError, ValidationError, TypeError) as exc:
         raise LLMProviderError(f"Report chat LLM returned invalid JSON: {exc}") from exc
