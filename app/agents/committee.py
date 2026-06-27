@@ -119,13 +119,24 @@ def _is_unavailable_llm_text(text: str) -> bool:
     return not normalized or "mock llm response" in normalized
 
 
-def _compute_weighted_confidence(agent_outputs: dict) -> float:
-    """Weighted committee confidence derived from each agent's self-assessed confidence.
-    基于每个 Agent 的自评置信度加权计算委员会综合置信度。
+def _compute_weighted_confidence(
+    agent_outputs: dict,
+    sources_count: int = 0,
+    financial_enabled: bool = False,
+    market_enabled: bool = False,
+    grade_counts: dict | None = None,
+) -> float:
+    """Weighted committee confidence with data-completeness adjustments.
 
-    Agents that failed (confidence == 0.0 or 0.3 from safe_run_agent) pull the
-    average down naturally, signalling data gaps in the final score.
+    The base score is a weighted average of each agent's self-assessed confidence.
+    That base is then adjusted by real-world evidence signals so the final number
+    varies with research depth rather than staying flat at ~0.76.
+
+    在加权 Agent 自评置信度的基础上，引入实际证据信号调整，使置信度能反映
+    研究深度差异，而不是全部停留在 ~0.76。
     """
+    grade_counts = grade_counts or {}
+    # 1) Weighted base from agent self-assessments
     weighted_sum = 0.0
     weight_sum = 0.0
     for agent_key, weight in AGENT_CONFIDENCE_WEIGHTS.items():
@@ -136,8 +147,42 @@ def _compute_weighted_confidence(agent_outputs: dict) -> float:
             weight_sum += weight
 
     if weight_sum == 0:
-        return 0.5
-    return round(weighted_sum / weight_sum, 2)
+        base = 0.5
+    else:
+        base = weighted_sum / weight_sum
+
+    # 2) Data-completeness adjustment (−0.25 … +0.15)
+    adjustment = 0.0
+
+    # Source richness
+    if sources_count <= 1:
+        adjustment -= 0.18
+    elif sources_count <= 3:
+        adjustment -= 0.10
+    elif sources_count <= 6:
+        adjustment -= 0.04
+    elif sources_count >= 16:
+        adjustment += 0.04
+
+    # Structural data availability
+    if financial_enabled:
+        adjustment += 0.05
+    if market_enabled:
+        adjustment += 0.04
+
+    # Source quality
+    if grade_counts.get("A", 0) >= 2:
+        adjustment += 0.04
+    elif grade_counts.get("A", 0) == 1:
+        adjustment += 0.02
+    if grade_counts.get("D", 0) >= 2:
+        adjustment -= 0.04
+
+    final = base + adjustment
+    # Clamp to a sensible range — never pretend high confidence on thin data,
+    # never drop below "there's some signal" floor.
+    final = max(0.32, min(0.92, final))
+    return round(final, 2)
 
 
 def analyze(company_name: str, context: dict) -> dict:
@@ -196,7 +241,17 @@ def analyze(company_name: str, context: dict) -> dict:
         "后续应继续跟踪基本面、新闻事件、市场情绪和风险暴露。",
     ]
     verdict = infer_verdict(summary)
-    confidence = _compute_weighted_confidence(agent_outputs)
+    # Extract source quality grades for confidence adjustment
+    source_quality = agent_outputs.get("source_quality", {})
+    grade_counts = source_quality.get("grade_counts", {})
+    market_profile = context.get("market_profile", {})
+    confidence = _compute_weighted_confidence(
+        agent_outputs,
+        sources_count=sources_count,
+        financial_enabled=bool(financial_profile.get("enabled")),
+        market_enabled=bool(market_profile.get("enabled")),
+        grade_counts=grade_counts,
+    )
 
     return {
         "agent": "committee",
