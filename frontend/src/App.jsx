@@ -30,6 +30,8 @@ import {
   X,
 } from "lucide-react";
 import { API_BASE, formatApiErrorMessage } from "./apiClient.js";
+import { deleteReportChatMessage, getReportChatItemKey } from "./reportChatHistory.js";
+import { cleanMarkdownText, extractExecutiveSummary, normalizeReportMarkdown } from "./reportContent.js";
 import { loadStockIndex, mergeSymbolCandidates, parseWatchlistImportText, searchStockIndex } from "./stockSearch.js";
 
 const DISCLAIMER_STORAGE_KEY = "deepalpha_disclaimer_accepted";
@@ -149,6 +151,14 @@ function buildRecommendedSelection(company, ticker) {
     market: exchangeFromTicker(ticker),
     confidence: 1,
     source: "recommended",
+  };
+}
+
+function normalizeReportResultPayload(result) {
+  if (!result || typeof result !== "object") return null;
+  return {
+    ...result,
+    markdown_report: normalizeReportMarkdown(result.markdown_report),
   };
 }
 
@@ -582,25 +592,6 @@ function MarketReviewPanel({ review }) {
   );
 }
 
-function extractExecutiveSummary(content) {
-  if (!content) return [];
-
-  const lines = content.split("\n");
-  const startIndex = lines.findIndex((line) => /^##\s+Executive Summary/i.test(line.trim()));
-  if (startIndex < 0) return [];
-
-  const items = [];
-  for (const line of lines.slice(startIndex + 1)) {
-    const trimmed = line.trim();
-    if (/^##\s+/.test(trimmed)) break;
-    if (/^[-*]\s+/.test(trimmed)) {
-      items.push(cleanMarkdownText(trimmed));
-    }
-  }
-
-  return items.slice(0, 8);
-}
-
 function SourceQualitySummary({ sourceQuality }) {
   const gradeCounts = sourceQuality?.grade_counts || {};
   const grades = [
@@ -676,15 +667,6 @@ function ExecutiveSummaryCard({ content }) {
   );
 }
 
-function cleanMarkdownText(text) {
-  return String(text)
-    .replace(/^#{1,6}\s*/, "")
-    .replace(/^[-*]\s+/, "")
-    .replace(/^\*{1,2}(.+?)\*{1,2}$/, "$1")
-    .replace(/^_{1,2}(.+?)_{1,2}$/, "$1")
-    .trim();
-}
-
 function renderInlineMarkdown(text, keyPrefix = "line") {
   const nodes = [];
   // Match markdown links, bold, italic, AND bare URLs
@@ -751,10 +733,11 @@ function reportSectionId(index, title) {
 }
 
 function extractReportTOC(content) {
-  if (!content) return [];
+  const reportText = normalizeReportMarkdown(content);
+  if (!reportText) return [];
   const toc = [];
   let sectionIndex = 0;
-  for (const line of content.split("\n")) {
+  for (const line of reportText.split("\n")) {
     const trimmed = line.trim();
     const h1 = trimmed.match(/^#\s+(.+)/);
     const h2 = trimmed.match(/^##+\s+(.+)/);
@@ -773,14 +756,15 @@ function extractReportTOC(content) {
 
 function MarkdownReport({ content, printMode = false, highlightedSectionId = "" }) {
   const [collapsed, setCollapsed] = useState({});
+  const reportText = normalizeReportMarkdown(content);
 
   // Pre-parse content into sections for collapse support
   const sections = useMemo(() => {
-    if (!content) return [];
+    if (!reportText) return [];
     const result = [];
     let idx = 0;
     let current = null;
-    for (const line of content.split("\n")) {
+    for (const line of reportText.split("\n")) {
       const trimmed = line.trim();
       const h1 = trimmed.match(/^#\s+(.+)/);
       const h2 = trimmed.match(/^##+\s+(.+)/);
@@ -805,7 +789,7 @@ function MarkdownReport({ content, printMode = false, highlightedSectionId = "" 
       }
     }
     return result;
-  }, [content]);
+  }, [reportText]);
 
   const hasCollapsible = sections.some((s) => s.level === 2);
   const anyCollapsed = Object.values(collapsed).some(Boolean);
@@ -904,7 +888,7 @@ function MarkdownReport({ content, printMode = false, highlightedSectionId = "" 
     );
   }
 
-  if (!content) return null;
+  if (!reportText) return null;
 
   return (
     <div className={classNames("report-document space-y-3", printMode ? "print-report-body" : "")}>
@@ -1512,8 +1496,9 @@ export default function App() {
     requestJson(`/report/tasks/${taskId}`)
       .then((task) => {
         if (task.status === "success" && task.result?.markdown_report) {
+          const normalizedResult = normalizeReportResultPayload(task.result);
           setReportTask(task);
-          setReportResult(task.result);
+          setReportResult(normalizedResult);
         }
       })
       .catch(() => window.localStorage.removeItem(LAST_REPORT_TASK_STORAGE_KEY));
@@ -1685,7 +1670,7 @@ export default function App() {
         throw new Error("Report task timed out");
       }
 
-      setReportResult(taskResult);
+      setReportResult(normalizeReportResultPayload(taskResult));
       window.localStorage.setItem(LAST_REPORT_TASK_STORAGE_KEY, task.task_id);
       await loadDashboardData(companyName.trim());
     } catch (err) {
@@ -1803,7 +1788,7 @@ export default function App() {
   }
 
   function deleteChatMessage(messageId) {
-    setReportChatHistory((items) => items.filter((item) => item.id !== messageId));
+    setReportChatHistory((items) => deleteReportChatMessage(items, messageId));
   }
 
   async function addWatchlistCompany() {
@@ -2404,12 +2389,12 @@ export default function App() {
                   {reportChatHistory.length > 0 && (
                     <div className="max-h-[400px] space-y-3 overflow-y-auto scroll-smooth custom-scrollbar" ref={chatContainerRef}>
                       {reportChatHistory.map((item) => {
-                        const itemKey = item.message_id || item.id || `${item.created_at}-${item.question}`;
+                        const itemKey = getReportChatItemKey(item);
                         return (
                         <article className="group relative rounded-md border border-slate-800 bg-slate-900/80 p-3" key={itemKey}>
                           <button
                             className="absolute right-2 top-2 rounded p-1 text-slate-600 opacity-0 hover:bg-slate-800 hover:text-red-300 group-hover:opacity-100"
-                            onClick={() => deleteChatMessage(item.id)}
+                            onClick={() => deleteChatMessage(itemKey)}
                             type="button"
                             title="删除此条追问"
                           >
