@@ -618,20 +618,31 @@ def report_chat(request: ReportChatRequest, http_request: Request) -> dict:
     if request.task_id:
         task = report_tasks.get_task(request.task_id)
         if task is None:
-            raise HTTPException(status_code=404, detail="Report task not found")
-        if task["status"] != "success":
+            log_event(
+                "report_chat_task_missing",
+                task_id=request.task_id,
+                reason="db_maybe_reset",
+            )
+            if not markdown_report:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Report task not found and no markdown_report provided. "
+                    "Please regenerate the report or provide the report content.",
+                )
+        elif task["status"] != "success":
             raise HTTPException(status_code=400, detail="Report task is not completed")
-        result = task.get("result") or {}
-        resolved_company_name = str(result.get("company_name") or request.company_name)
-        markdown_report = str(result.get("markdown_report") or "").strip()
-        if not markdown_report:
-            raise HTTPException(status_code=400, detail="Completed report has no context")
-        market_profile = result.get("market_profile") or {}
-        financial_profile = result.get("financial_profile") or {}
-        source_quality = result.get("source_quality") or {}
-        task_context = True
-        report_generated_at = task.get("updated_at")
-        recent_turns = get_recent_turns(user_id, request.task_id, limit=6)
+        else:
+            result = task.get("result") or {}
+            resolved_company_name = str(result.get("company_name") or request.company_name)
+            markdown_report = str(result.get("markdown_report") or "").strip() or markdown_report
+            if not markdown_report:
+                raise HTTPException(status_code=400, detail="Completed report has no context")
+            market_profile = result.get("market_profile") or {}
+            financial_profile = result.get("financial_profile") or {}
+            source_quality = result.get("source_quality") or {}
+            task_context = True
+            report_generated_at = task.get("updated_at")
+            recent_turns = get_recent_turns(user_id, request.task_id, limit=6)
 
     answer = answer_report_question(
         company_name=resolved_company_name,

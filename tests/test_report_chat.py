@@ -160,18 +160,36 @@ def test_report_chat_requires_report_context() -> None:
     assert response.status_code == 422
 
 
-def test_report_chat_returns_404_for_missing_task() -> None:
+def test_report_chat_falls_back_when_task_missing(monkeypatch) -> None:
+    """When task_id points to a missing task, the endpoint falls back to
+    the request markdown_report instead of returning 404."""
+
+    def fake_generate_text(prompt: str, system_prompt: str = "", max_tokens: int = 800, json_mode: bool = False) -> str:
+        return json.dumps(
+            {
+                "answer": "Fallback response without full task context.",
+                "key_points": ["Limited context available."],
+                "risks": [],
+                "cited_sources": [],
+                "data_quality_warning": "Task was not found; only request markdown used.",
+            }
+        )
+
+    monkeypatch.setattr("app.llm.client.generate_text", fake_generate_text)
+
     response = client.post(
         "/chat/report",
         json={
             "company_name": "Tesla",
             "question": "What changed?",
             "task_id": "missing-task",
+            "markdown_report": "# Tesla\nRevenue grew.",
         },
     )
 
-    assert response.status_code == 404
-    assert response.json() == {"detail": "Report task not found"}
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Fallback response without full task context."
+    assert response.json()["web_citations"] == []
 
 
 def test_report_chat_rejects_unfinished_task() -> None:

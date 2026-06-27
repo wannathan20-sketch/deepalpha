@@ -1520,9 +1520,8 @@ export default function App() {
       };
       if (reportTask?.task_id) {
         payload.task_id = reportTask.task_id;
-      } else {
-        payload.markdown_report = reportResult.markdown_report;
       }
+      payload.markdown_report = reportResult.markdown_report;
       const answer = await requestJson("/chat/report", {
         method: "POST",
         body: JSON.stringify(payload),
