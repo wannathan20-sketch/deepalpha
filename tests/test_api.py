@@ -53,6 +53,10 @@ def test_config() -> None:
     assert "debug_routes_enabled" in data
     assert "market_review_cache_ttl_seconds" in data
     assert "provider_health_cache_ttl_seconds" in data
+    assert "report_user_daily_limit" in data
+    assert "report_create_rate_limit_per_hour" in data
+    assert "report_create_rate_limit_per_day" in data
+    assert "report_global_daily_limit" in data
     assert "OPENAI_API_KEY" not in data
     assert "TAVILY_API_KEY" not in data
 
@@ -896,6 +900,25 @@ def test_report_task_rate_limit(monkeypatch) -> None:
 
     assert first_response.status_code == 200
     assert second_response.status_code == 429
+
+
+def test_development_report_task_defaults_do_not_rate_limit(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.delenv("REPORT_USER_DAILY_LIMIT", raising=False)
+    monkeypatch.delenv("REPORT_CREATE_RATE_LIMIT_PER_HOUR", raising=False)
+    monkeypatch.delenv("REPORT_CREATE_RATE_LIMIT_PER_DAY", raising=False)
+    monkeypatch.delenv("REPORT_GLOBAL_DAILY_LIMIT", raising=False)
+
+    responses = [
+        client.post(
+            "/report/tasks",
+            headers={"X-DeepAlpha-User-Id": "dev-user"},
+            json={"company_name": "DevLimitCo"},
+        )
+        for _ in range(4)
+    ]
+
+    assert [response.status_code for response in responses] == [200, 200, 200, 200]
 
 
 def test_report_global_daily_limit(monkeypatch) -> None:

@@ -1644,13 +1644,13 @@ export default function App() {
     const finalThreadId = generatedThreadId;
     setLoading("report");
     setReportTask({ status: "queued", steps: [] });
-    setReportResult(null);
     setReportQuestion("");
     setReportStrategy("general");
     setReportSearchMode("auto");
     setReportChatHistory([]);
     setReportChatError("");
     setError("");
+    let createdTask = null;
     try {
       const task = await requestJson("/report/tasks", {
         method: "POST",
@@ -1663,6 +1663,7 @@ export default function App() {
           data_provider: backendMarketProvider,
         }),
       });
+      createdTask = task;
       setReportTask(task);
       setReportStartedAt(Date.now());
 
@@ -1689,6 +1690,9 @@ export default function App() {
       await loadDashboardData(companyName.trim());
     } catch (err) {
       const message = String(err.message || "");
+      if (!createdTask?.task_id) {
+        setReportTask(null);
+      }
       if (message.includes("401")) {
         window.localStorage.removeItem(ACCESS_CODE_STORAGE_KEY);
         setAccessCodeInput("");
@@ -2287,6 +2291,12 @@ export default function App() {
             <ReportTaskProgress task={reportTask} startedAt={reportStartedAt} />
             {reportResult ? (
               <div className="mt-4 space-y-4">
+                {loading === "report" && (
+                  <div className="flex items-center gap-2 rounded-md border border-cyan-400/25 bg-cyan-400/10 px-3 py-2 text-sm text-cyan-100">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    新报告生成中，当前仍显示上一份报告。
+                  </div>
+                )}
                 <div className="sticky top-0 z-10 -mx-1 space-y-3 bg-slate-900/95 px-1 pb-3 backdrop-blur-sm">
                   <div className="grid grid-cols-3 gap-2">
                     <MetricCard label="Decision" value={reportResult.final_report?.recommendation} icon={TrendingUp} />
@@ -2500,7 +2510,19 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-slate-500">点击“生成投研报告”后，报告会在这里生成。</p>
+              loading === "report" ? (
+                <div className="mt-4 rounded-md border border-cyan-400/25 bg-slate-950/80 p-4 text-sm text-slate-300">
+                  <div className="flex items-center gap-2 font-medium text-cyan-100">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    正在生成投研报告
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">
+                    多 Agent 分析通常需要 1-3 分钟，进度会显示在上方。
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">点击“生成投研报告”后，报告会在这里生成。</p>
+              )
             )}
           </Panel>
 

@@ -57,6 +57,10 @@ class RuntimeConfigResponse(BaseModel):
     debug_routes_enabled: bool
     market_review_cache_ttl_seconds: int | None = None
     provider_health_cache_ttl_seconds: int | None = None
+    report_user_daily_limit: int | None = None
+    report_create_rate_limit_per_hour: int | None = None
+    report_create_rate_limit_per_day: int | None = None
+    report_global_daily_limit: int | None = None
 
 
 class AnalyzeRequest(BaseModel):

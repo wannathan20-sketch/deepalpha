@@ -13,6 +13,7 @@ from app.config import (
     get_access_code,
     get_cors_allow_origin_regex,
     get_int_env,
+    get_report_limit,
     get_runtime_config,
     validate_runtime_config,
 )
@@ -105,22 +106,22 @@ def _enforce_report_generation_limits(request: Request) -> None:
     client_host = request.client.host if request.client else "unknown"
     _check_limit(
         f"report_create_user_daily:{user_id}",
-        limit=get_int_env("REPORT_USER_DAILY_LIMIT", 3),
+        limit=get_report_limit("REPORT_USER_DAILY_LIMIT", 3),
         window_seconds=86400,
     )
     _check_limit(
         f"report_create_hourly:{client_host}",
-        limit=get_int_env("REPORT_CREATE_RATE_LIMIT_PER_HOUR", 5),
+        limit=get_report_limit("REPORT_CREATE_RATE_LIMIT_PER_HOUR", 5),
         window_seconds=3600,
     )
     _check_limit(
         f"report_create_daily:{client_host}",
-        limit=get_int_env("REPORT_CREATE_RATE_LIMIT_PER_DAY", 10),
+        limit=get_report_limit("REPORT_CREATE_RATE_LIMIT_PER_DAY", 10),
         window_seconds=86400,
     )
     _check_limit(
         "report_create_global_daily",
-        limit=get_int_env("REPORT_GLOBAL_DAILY_LIMIT", 50),
+        limit=get_report_limit("REPORT_GLOBAL_DAILY_LIMIT", 50),
         window_seconds=86400,
     )
 

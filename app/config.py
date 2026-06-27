@@ -36,6 +36,16 @@ def get_int_env(name: str, default: int) -> int:
         return default
 
 
+def get_int_env_with_development_default(name: str, production_default: int, development_default: int = 0) -> int:
+    if name in os.environ:
+        return get_int_env(name, production_default)
+    return production_default if is_production() else development_default
+
+
+def get_report_limit(name: str, production_default: int) -> int:
+    return get_int_env_with_development_default(name, production_default)
+
+
 def get_access_code() -> str:
     return os.getenv("DEEPALPHA_ACCESS_CODE", "").strip()
 
@@ -135,8 +145,8 @@ def get_runtime_config() -> dict:
         "financials_cache_ttl_seconds": get_int_env("FINANCIALS_CACHE_TTL_SECONDS", 21600),
         "access_code_required": bool(get_access_code()),
         "financials_rate_limit": get_int_env("FINANCIALS_RATE_LIMIT", 60),
-        "report_user_daily_limit": get_int_env("REPORT_USER_DAILY_LIMIT", 3),
-        "report_create_rate_limit_per_hour": get_int_env("REPORT_CREATE_RATE_LIMIT_PER_HOUR", 5),
-        "report_create_rate_limit_per_day": get_int_env("REPORT_CREATE_RATE_LIMIT_PER_DAY", 10),
-        "report_global_daily_limit": get_int_env("REPORT_GLOBAL_DAILY_LIMIT", 50),
+        "report_user_daily_limit": get_report_limit("REPORT_USER_DAILY_LIMIT", 3),
+        "report_create_rate_limit_per_hour": get_report_limit("REPORT_CREATE_RATE_LIMIT_PER_HOUR", 5),
+        "report_create_rate_limit_per_day": get_report_limit("REPORT_CREATE_RATE_LIMIT_PER_DAY", 10),
+        "report_global_daily_limit": get_report_limit("REPORT_GLOBAL_DAILY_LIMIT", 50),
     }
