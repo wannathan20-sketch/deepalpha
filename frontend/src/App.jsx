@@ -771,11 +771,11 @@ function extractReportTOC(content) {
 }
 
 function MarkdownReport({ content, printMode = false, highlightedSectionId = "" }) {
-  if (!content) return null;
   const [collapsed, setCollapsed] = useState({});
 
   // Pre-parse content into sections for collapse support
   const sections = useMemo(() => {
+    if (!content) return [];
     const result = [];
     let idx = 0;
     let current = null;
@@ -902,6 +902,8 @@ function MarkdownReport({ content, printMode = false, highlightedSectionId = "" 
       </p>
     );
   }
+
+  if (!content) return null;
 
   return (
     <div className={classNames("report-document space-y-3", printMode ? "print-report-body" : "")}>
