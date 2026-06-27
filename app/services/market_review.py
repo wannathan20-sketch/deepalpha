@@ -99,16 +99,18 @@ def _summary(market: str, status: str, indices: list[dict], errors: list[str]) -
     avg_change = _round(mean(changes)) if changes else None
     status_text = {"up": "偏强", "down": "走弱", "mixed": "分化", "unknown": "待确认"}[_market_status(indices)]
     leaders = sorted(indices, key=lambda item: item.get("change_percent") or -999, reverse=True)[:2]
-    leader_text = "、".join(f"{item['name']} {item['change_percent']}%" for item in leaders if item.get("change_percent") is not None)
+    leader_text = "、".join(
+        f"{item['name']} {item['latest_close']}（{item['change_percent']:+.2f}%）"
+        for item in leaders
+        if item.get("change_percent") is not None and item.get("latest_close") is not None
+    )
     lines = [f"{label}主要指数{status_text}，平均涨跌幅 {avg_change if avg_change is not None else 'N/A'}%。"]
     if leader_text:
         lines.append(f"相对强势指数：{leader_text}。")
     if status == "partial":
         lines.append("部分指数或板块数据缺失，需结合交易所/行情终端复核。")
     if any(item.get("instrument_type") == "etf_proxy" for item in indices):
-        lines.append(
-            "S&P 500、Dow 中的可用项可能采用 ETF 代理，精确指数点位请结合指数行情终端复核。"
-        )
+        lines.append("部分指数通过 ETF 拟合，数据仅供参考。")
     return lines
 
 

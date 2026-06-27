@@ -433,6 +433,16 @@ function formatPercent(value) {
   return `${number > 0 ? "+" : ""}${number.toFixed(2)}%`;
 }
 
+function formatPrice(value) {
+  if (value === null || value === undefined || value === "") return "";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  if (number >= 1000) {
+    return number.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  return number.toFixed(2);
+}
+
 function MarketReviewPanel({ review }) {
   const reviews = review?.reviews || {};
   const markets = [
@@ -481,36 +491,22 @@ function MarketReviewPanel({ review }) {
                   <div className="space-y-1 rounded-md border border-slate-800/70 bg-slate-900/40 p-2 text-xs" key={index.symbol}>
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate text-slate-300">{index.name}</span>
-                      <span
-                        className={classNames(
-                          "font-mono",
-                          Number(index.change_percent) > 0
-                            ? "text-emerald-200"
-                            : Number(index.change_percent) < 0
-                              ? "text-red-200"
-                              : "text-slate-400",
+                      <span className="space-x-2 font-mono">
+                        {index.latest_close != null && (
+                          <span className="text-slate-200">{formatPrice(index.latest_close)}</span>
                         )}
-                      >
-                        {formatPercent(index.change_percent)}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
-                      {index.provider && <span className="rounded border border-slate-700 px-1.5 py-0.5">provider: {index.provider}</span>}
-                      <span className="rounded border border-slate-700 px-1.5 py-0.5">
-                        {index.instrument_type === "etf_proxy"
-                          ? `ETF代理 ${index.proxy_symbol || ""}`.trim()
-                          : "直接指数"}
-                      </span>
-                      {index.source_url && (
-                        <a
-                          className="rounded border border-cyan-400/25 px-1.5 py-0.5 text-cyan-200 hover:border-cyan-300"
-                          href={index.source_url}
-                          rel="noreferrer"
-                          target="_blank"
+                        <span
+                          className={classNames(
+                            Number(index.change_percent) > 0
+                              ? "text-emerald-200"
+                              : Number(index.change_percent) < 0
+                                ? "text-red-200"
+                                : "text-slate-400",
+                          )}
                         >
-                          来源
-                        </a>
-                      )}
+                          {formatPercent(index.change_percent)}
+                        </span>
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -1024,7 +1020,7 @@ function MarketChart({ symbol, displaySymbol, provider, exchange = "", tradingVi
         <div>
           <div className="text-sm font-semibold text-slate-100">{displaySymbol || symbol}</div>
           <div className="mt-1 text-xs text-slate-500">
-            {chartData.provider || provider} · Symbol: {chartData.symbol || symbol} · {chartData.exchange || "Market"} · {chartData.currency || "Currency"}
+            {chartData.symbol || symbol} · {chartData.exchange || ""} {chartData.currency ? `· ${chartData.currency}` : ""}
           </div>
         </div>
         <div className="text-right">

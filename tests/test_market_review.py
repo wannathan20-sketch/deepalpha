@@ -133,7 +133,7 @@ def test_market_review_exposes_etf_proxy_warning(monkeypatch) -> None:
     assert review["context_status"] == "available"
     assert review["indices"][0]["proxy_symbol"] == "SPY"
     assert review["indices"][2]["proxy_symbol"] == "DIA"
-    assert any("ETF 代理" in line for line in review["summary"])
+    assert any("ETF 拟合" in line for line in review["summary"])
 
 
 def test_market_review_rejects_unknown_market() -> None:
