@@ -414,7 +414,6 @@ const REPORT_STEP_LABELS = {
 function ReportTaskProgress({ task, startedAt }) {
   const steps = task?.steps || [];
   const [elapsed, setElapsed] = useState(0);
-  if (!task && !steps.length) return null;
 
   useEffect(() => {
     if (!startedAt || task?.status === "success" || task?.status === "failed") return;
@@ -423,6 +422,8 @@ function ReportTaskProgress({ task, startedAt }) {
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [startedAt, task?.status]);
+
+  if (!task && !steps.length) return null;
 
   const doneCount = steps.filter((s) => s.status === "success").length;
   const totalSteps = steps.length || 7;
