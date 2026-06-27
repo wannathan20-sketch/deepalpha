@@ -2012,7 +2012,7 @@ export default function App() {
         </div>
       )}
 
-      <main className="grid gap-4 xl:grid-cols-[280px_minmax(460px,1fr)_380px]">
+      <main className="grid gap-4 lg:grid-cols-[280px_minmax(460px,1fr)_380px]">
         <aside className="space-y-4">
           <Panel title="推荐" icon={Star}>
             <div className="space-y-2">
