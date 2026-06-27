@@ -120,6 +120,70 @@ def _filter_web_citations(citations: list[dict], results: list[dict]) -> list[di
     return filtered
 
 
+def _extract_json(text: str) -> str:
+    """Extract a JSON object from LLM output that may include markdown fences,
+    trailing text, or minor syntax issues.  Returns the raw JSON string.
+    从 LLM 输出中提取 JSON 对象，处理 markdown 代码块和尾部文本等问题。
+    """
+    # 1) Strip markdown fenced code blocks
+    fenced = re.match(r"\s*```(?:json)?\s*\n?(.*?)\n?\s*```\s*$", text, re.DOTALL)
+    if fenced:
+        text = fenced.group(1).strip()
+
+    # 2) Find the outermost JSON object
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return text
+    text = text[start:end + 1]
+
+    # 3) Try to parse as-is first
+    try:
+        json.loads(text)
+        return text
+    except json.JSONDecodeError:
+        pass
+
+    # 4) Repair common LLM JSON issues
+    repaired = _repair_json(text)
+    return repaired
+
+
+def _repair_json(text: str) -> str:
+    """Apply conservative repairs for common LLM JSON mistakes:
+    - Trailing comma before closing bracket/brace
+    - Unescaped literal newlines inside string values
+    - Stray control characters
+    保守修复 LLM 常见的 JSON 错误。
+    """
+    # Remove trailing commas (before ] or })
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+
+    # Collapse literal newlines/tabs inside quoted strings to spaces.
+    # We walk character by character to avoid modifying newlines outside strings.
+    result: list[str] = []
+    in_string = False
+    escape = False
+    for ch in text:
+        if escape:
+            result.append(ch)
+            escape = False
+            continue
+        if ch == "\\":
+            result.append(ch)
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            result.append(ch)
+            continue
+        if in_string and ch in ("\n", "\r", "\t"):
+            result.append(" ")
+            continue
+        result.append(ch)
+    return "".join(result)
+
+
 def _parse_response(
     raw_response: str,
     *,
@@ -131,7 +195,8 @@ def _parse_response(
     if not raw_response.strip():
         raise LLMProviderError("Report chat LLM returned an empty response.")
     try:
-        payload = json.loads(raw_response)
+        json_text = _extract_json(raw_response)
+        payload = json.loads(json_text)
         # Some LLMs (e.g. DeepSeek without response_format) return
         # cited_sources as plain strings (section IDs).  Normalize them
         # into objects so Pydantic validation does not reject the entire

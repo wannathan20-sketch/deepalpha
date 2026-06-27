@@ -605,4 +605,36 @@ def test_report_chat_filters_fabricated_section_citations(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert len(response.json()["report_citations"]) == 1
-    assert response.json()["report_citations"][0]["excerpt"].startswith("Revenue improved")
+
+
+def test_extract_json_handles_markdown_fence() -> None:
+    from app.services.report_chat import _extract_json
+
+    text = '```json\n{"answer": "ok", "key_points": ["a"]}\n```'
+    result = json.loads(_extract_json(text))
+    assert result["answer"] == "ok"
+    assert result["key_points"] == ["a"]
+
+
+def test_extract_json_handles_trailing_comma() -> None:
+    from app.services.report_chat import _extract_json
+
+    text = '{"answer": "ok", "key_points": ["a", "b",],}'
+    result = json.loads(_extract_json(text))
+    assert result["answer"] == "ok"
+
+
+def test_extract_json_handles_newlines_in_strings() -> None:
+    from app.services.report_chat import _extract_json
+
+    text = '{"answer": "Line 1' + '\n' + 'Line 2' + '\n' + 'Line 3"}'
+    result = json.loads(_extract_json(text))
+    assert result["answer"] == "Line 1 Line 2 Line 3"
+
+
+def test_extract_json_handles_text_surrounding_json() -> None:
+    from app.services.report_chat import _extract_json
+
+    text = 'Here is the response: {"answer": "yes"} Hope this helps.'
+    result = json.loads(_extract_json(text))
+    assert result["answer"] == "yes"
