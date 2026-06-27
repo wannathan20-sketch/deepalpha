@@ -7,6 +7,8 @@ import {
   Brain,
   Building2,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock3,
   Database,
   Download,
@@ -14,6 +16,7 @@ import {
   FileText,
   History,
   Loader2,
+  Maximize2,
   MessageCircle,
   Network,
   Plus,
@@ -22,7 +25,9 @@ import {
   ShieldCheck,
   Star,
   TrendingUp,
+  Trash2,
   Wrench,
+  X,
 } from "lucide-react";
 import { API_BASE, formatApiErrorMessage } from "./apiClient.js";
 import { loadStockIndex, mergeSymbolCandidates, parseWatchlistImportText, searchStockIndex } from "./stockSearch.js";
@@ -231,6 +236,17 @@ function delay(ms) {
   });
 }
 
+function Skeleton({ className = "", ...props }) {
+  return (
+    <div
+      className={classNames("animate-pulse rounded bg-slate-800/60", className)}
+      role="status"
+      aria-label="加载中"
+      {...props}
+    />
+  );
+}
+
 function Panel({ title, icon: Icon, children, className = "", action }) {
   return (
     <section className={classNames("rounded-lg border border-slate-800 bg-slate-900/80 p-4 shadow-xl shadow-slate-950/20", className)}>
@@ -315,9 +331,20 @@ function safeReportUrl(url) {
 function LatestFinancials({ profile, status }) {
   if (status === "loading") {
     return (
-      <div className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-950/70 p-3 text-sm text-slate-400">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        正在加载最新财报...
+      <div className="space-y-3 rounded-md border border-slate-800 bg-slate-950/70 p-3">
+        <Skeleton className="h-4 w-32" />
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <Skeleton className="h-14 w-full" />
+          <Skeleton className="h-14 w-full" />
+          <Skeleton className="h-14 w-full" />
+          <Skeleton className="h-14 w-full" />
+        </div>
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <Skeleton className="h-14 w-full" />
+          <Skeleton className="h-14 w-full" />
+          <Skeleton className="h-14 w-full" />
+          <Skeleton className="h-14 w-full" />
+        </div>
       </div>
     );
   }
@@ -384,14 +411,30 @@ const REPORT_STEP_LABELS = {
   failed: "失败",
 };
 
-function ReportTaskProgress({ task }) {
+function ReportTaskProgress({ task, startedAt }) {
   const steps = task?.steps || [];
+  const [elapsed, setElapsed] = useState(0);
   if (!task && !steps.length) return null;
+
+  useEffect(() => {
+    if (!startedAt || task?.status === "success" || task?.status === "failed") return;
+    const tick = () => setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [startedAt, task?.status]);
+
+  const doneCount = steps.filter((s) => s.status === "success").length;
+  const totalSteps = steps.length || 7;
 
   return (
     <div className="mt-3 rounded-md border border-slate-800 bg-slate-950/70 p-3">
       <div className="mb-2 flex items-center justify-between gap-2 text-xs text-slate-400">
-        <span>报告任务状态：{task?.status || "queued"}</span>
+        <span>
+          报告任务状态：{task?.status || "queued"}
+          {elapsed > 0 && <span className="ml-2 tabular-nums">· {elapsed}s</span>}
+          {totalSteps > 0 && <span className="ml-1 text-slate-600">· {doneCount}/{totalSteps}</span>}
+        </span>
         {task?.task_id && <span className="font-mono text-[11px] text-slate-600">{task.task_id.slice(0, 8)}</span>}
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
@@ -452,7 +495,25 @@ function MarketReviewPanel({ review }) {
   ];
 
   if (!review) {
-    return <p className="text-sm text-slate-500">正在加载市场复盘...</p>;
+    return (
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-3 w-32" />
+        </div>
+        <div className="grid gap-3 lg:grid-cols-3">
+          {[1, 2, 3].map((n) => (
+            <div className="space-y-3 rounded-md border border-slate-800 bg-slate-950/70 p-3" key={n}>
+              <Skeleton className="h-4 w-12" />
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-3/4" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -625,7 +686,8 @@ function cleanMarkdownText(text) {
 
 function renderInlineMarkdown(text, keyPrefix = "line") {
   const nodes = [];
-  const tokenPattern = /\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*/g;
+  // Match markdown links, bold, italic, AND bare URLs
+  const tokenPattern = /\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|https?:\/\/[^\s<>"{}|\\^`[\]]+/g;
   let lastIndex = 0;
   let match = tokenPattern.exec(text);
 
@@ -645,6 +707,19 @@ function renderInlineMarkdown(text, keyPrefix = "line") {
           target="_blank"
         >
           {cleanMarkdownText(match[1])}
+        </a>,
+      );
+    } else if (match[0].startsWith("http")) {
+      const bareUrl = match[0];
+      nodes.push(
+        <a
+          className="report-link"
+          href={safeReportUrl(bareUrl)}
+          key={`${keyPrefix}-${match.index}`}
+          rel="noreferrer"
+          target="_blank"
+        >
+          {bareUrl}
         </a>,
       );
     } else {
@@ -674,79 +749,185 @@ function reportSectionId(index, title) {
   return `report-section-${index}-${slug}`;
 }
 
+function extractReportTOC(content) {
+  if (!content) return [];
+  const toc = [];
+  let sectionIndex = 0;
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    const h1 = trimmed.match(/^#\s+(.+)/);
+    const h2 = trimmed.match(/^##+\s+(.+)/);
+    if (h1 || h2) {
+      sectionIndex += 1;
+      const title = cleanMarkdownText(h1 ? h1[1] : h2[1]);
+      toc.push({
+        id: reportSectionId(sectionIndex, title),
+        title,
+        level: h1 ? 1 : 2,
+      });
+    }
+  }
+  return toc;
+}
+
 function MarkdownReport({ content, printMode = false, highlightedSectionId = "" }) {
   if (!content) return null;
-  let sectionIndex = 0;
+  const [collapsed, setCollapsed] = useState({});
+
+  // Pre-parse content into sections for collapse support
+  const sections = useMemo(() => {
+    const result = [];
+    let idx = 0;
+    let current = null;
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      const h1 = trimmed.match(/^#\s+(.+)/);
+      const h2 = trimmed.match(/^##+\s+(.+)/);
+      if (h1 || h2) {
+        idx += 1;
+        const title = cleanMarkdownText(h1 ? h1[1] : h2[1]);
+        current = {
+          id: reportSectionId(idx, title),
+          title,
+          level: h1 ? 1 : 2,
+          lines: [line],
+        };
+        result.push(current);
+      } else if (current) {
+        current.lines.push(line);
+      } else {
+        // Content before first heading
+        if (!result.length || result[0].level !== 0) {
+          result.unshift({ id: "preamble", title: "", level: 0, lines: [] });
+        }
+        result[0].lines.push(line);
+      }
+    }
+    return result;
+  }, [content]);
+
+  const hasCollapsible = sections.some((s) => s.level === 2);
+  const anyCollapsed = Object.values(collapsed).some(Boolean);
+
+  function toggleSection(sectionId) {
+    setCollapsed((prev) => ({ ...prev, [sectionId]: !prev[sectionId] }));
+  }
+
+  function toggleAll() {
+    if (anyCollapsed) {
+      setCollapsed({});
+    } else {
+      const all = {};
+      sections.forEach((s) => { if (s.level === 2) all[s.id] = true; });
+      setCollapsed(all);
+    }
+  }
+
+  function renderLine(line, index) {
+    const key = `${index}-${line.slice(0, 16)}`;
+    const trimmed = line.trim();
+    if (!trimmed) return <div className="h-1" key={key} />;
+    if (/^#\s+/.test(trimmed)) {
+      const sectionId = sections.find((s) => s.lines.includes(line))?.id || "";
+      return (
+        <h1
+          className={classNames("report-title scroll-mt-4", highlightedSectionId === sectionId ? "report-section-highlight" : "")}
+          id={sectionId}
+          key={key}
+        >
+          {renderInlineMarkdown(cleanMarkdownText(trimmed), key)}
+        </h1>
+      );
+    }
+    if (/^##+\s*/.test(trimmed)) {
+      const sectionId = sections.find((s) => s.lines.includes(line))?.id || "";
+      const isCollapsed = collapsed[sectionId];
+      return (
+        <button
+          className={classNames(
+            "report-section-heading scroll-mt-4 flex w-full items-center gap-2 text-left",
+            highlightedSectionId === sectionId ? "report-section-highlight" : "",
+          )}
+          id={sectionId}
+          key={key}
+          onClick={() => toggleSection(sectionId)}
+          type="button"
+          title={isCollapsed ? "展开" : "折叠"}
+        >
+          <span className="flex-1">{renderInlineMarkdown(cleanMarkdownText(trimmed), key)}</span>
+          {hasCollapsible && !printMode && (
+            isCollapsed
+              ? <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+              : <ChevronUp className="h-4 w-4 shrink-0 text-slate-500" />
+          )}
+        </button>
+      );
+    }
+    if (/^Sources[:：]$/i.test(trimmed)) {
+      return (
+        <h3 className="report-subheading" key={key}>
+          信息来源
+        </h3>
+      );
+    }
+    if (/^[-*]\s+/.test(trimmed)) {
+      const itemText = cleanMarkdownText(trimmed);
+      return (
+        <div className="report-list-item" key={key}>
+          <span className="report-list-dot" />
+          <span>{renderInlineMarkdown(itemText, key)}</span>
+        </div>
+      );
+    }
+    if (/^\d+\.\s+/.test(trimmed)) {
+      const [numberLabel] = trimmed.match(/^\d+\./) || [""];
+      const itemText = trimmed.replace(/^\d+\.\s+/, "");
+      return (
+        <div className="report-numbered-item" key={key}>
+          <span className="report-number">{numberLabel}</span>
+          <span>{renderInlineMarkdown(cleanMarkdownText(itemText), key)}</span>
+        </div>
+      );
+    }
+    if (/^[^：:]{2,24}[：:]$/.test(trimmed)) {
+      return (
+        <h3 className="report-subheading" key={key}>
+          {renderInlineMarkdown(cleanMarkdownText(trimmed.replace(/[：:]$/, "")), key)}
+        </h3>
+      );
+    }
+    return (
+      <p className="report-paragraph" key={key}>
+        {renderInlineMarkdown(cleanMarkdownText(trimmed), key)}
+      </p>
+    );
+  }
 
   return (
     <div className={classNames("report-document space-y-3", printMode ? "print-report-body" : "")}>
-      {content.split("\n").map((line, index) => {
-        const key = `${index}-${line.slice(0, 16)}`;
-        const trimmedLine = line.trim();
-        if (!trimmedLine) return <div className="h-1" key={key} />;
-        if (/^#\s+/.test(trimmedLine)) {
-          sectionIndex += 1;
-          const sectionId = reportSectionId(sectionIndex, cleanMarkdownText(trimmedLine));
-          return (
-            <h1
-              className={classNames("report-title scroll-mt-4", highlightedSectionId === sectionId ? "report-section-highlight" : "")}
-              id={sectionId}
-              key={key}
-            >
-              {renderInlineMarkdown(cleanMarkdownText(trimmedLine), key)}
-            </h1>
-          );
-        }
-        if (/^##+\s*/.test(trimmedLine)) {
-          sectionIndex += 1;
-          const sectionId = reportSectionId(sectionIndex, cleanMarkdownText(trimmedLine));
-          return (
-            <div
-              className={classNames("report-section-heading scroll-mt-4", highlightedSectionId === sectionId ? "report-section-highlight" : "")}
-              id={sectionId}
-              key={key}
-            >
-              <span>{renderInlineMarkdown(cleanMarkdownText(trimmedLine), key)}</span>
-            </div>
-          );
-        }
-        if (/^Sources[:：]$/i.test(trimmedLine)) {
-          return (
-            <h3 className="report-subheading" key={key}>
-              信息来源
-            </h3>
-          );
-        }
-        if (/^[-*]\s+/.test(trimmedLine)) {
-          const itemText = cleanMarkdownText(trimmedLine);
-          return (
-            <div className="report-list-item" key={key}>
-              <span className="report-list-dot" />
-              <span>{renderInlineMarkdown(itemText, key)}</span>
-            </div>
-          );
-        }
-        if (/^\d+\.\s+/.test(trimmedLine)) {
-          const [numberLabel] = trimmedLine.match(/^\d+\./) || [""];
-          const itemText = trimmedLine.replace(/^\d+\.\s+/, "");
-          return (
-            <div className="report-numbered-item" key={key}>
-              <span className="report-number">{numberLabel}</span>
-              <span>{renderInlineMarkdown(cleanMarkdownText(itemText), key)}</span>
-            </div>
-          );
-        }
-        if (/^[^：:]{2,24}[：:]$/.test(trimmedLine)) {
-          return (
-            <h3 className="report-subheading" key={key}>
-              {renderInlineMarkdown(cleanMarkdownText(trimmedLine.replace(/[：:]$/, "")), key)}
-            </h3>
-          );
-        }
+      {hasCollapsible && !printMode && (
+        <button
+          className="mb-2 inline-flex items-center gap-1.5 rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-400 hover:border-slate-500 hover:text-slate-200"
+          onClick={toggleAll}
+          type="button"
+        >
+          {anyCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+          {anyCollapsed ? "全部展开" : "全部折叠"}
+        </button>
+      )}
+      {sections.map((section) => {
+        const isSectionCollapsed = section.level === 2 && collapsed[section.id];
         return (
-          <p className="report-paragraph" key={key}>
-            {renderInlineMarkdown(cleanMarkdownText(trimmedLine), key)}
-          </p>
+          <div key={section.id}>
+            {section.lines.map((line, i) => {
+              // When section is collapsed, only show the heading line
+              if (isSectionCollapsed) {
+                const trimmed = line.trim();
+                if (!/^##+\s*/.test(trimmed)) return null;
+              }
+              return renderLine(line, /* globalIndex */ i);
+            })}
+          </div>
         );
       })}
     </div>
@@ -950,9 +1131,10 @@ function MarketChart({ symbol, displaySymbol, provider, exchange = "", tradingVi
 
   if (chartStatus === "loading") {
     return (
-      <div className="flex h-[420px] items-center justify-center rounded-md border border-slate-800 bg-slate-950/70 text-sm text-slate-400">
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-        正在从行情 provider 加载数据...
+      <div className="h-[420px] space-y-3 rounded-md border border-slate-800 bg-slate-950/70 p-4">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-3 w-40" />
+        <Skeleton className="h-[320px] w-full rounded-md" />
       </div>
     );
   }
@@ -1211,10 +1393,13 @@ export default function App() {
   const [reportChatHistory, setReportChatHistory] = useState([]);
   const [reportChatLoading, setReportChatLoading] = useState(false);
   const [reportChatError, setReportChatError] = useState("");
+  const [reportStartedAt, setReportStartedAt] = useState(null);
+  const [reportExpanded, setReportExpanded] = useState(false);
   const [highlightedReportSection, setHighlightedReportSection] = useState("");
   const [marketReview, setMarketReview] = useState(null);
   const [remoteSymbol, setRemoteSymbol] = useState(null);
   const [symbolCandidates, setSymbolCandidates] = useState([]);
+  const [candidateFocusIndex, setCandidateFocusIndex] = useState(-1);
   const [symbolLookupStatus, setSymbolLookupStatus] = useState("idle");
   const [stockIndex, setStockIndex] = useState([]);
   const [marketProvider, setMarketProvider] = useState("auto");
@@ -1225,6 +1410,7 @@ export default function App() {
   const [accessCodeInput, setAccessCodeInput] = useState(() => window.localStorage.getItem(ACCESS_CODE_STORAGE_KEY) || "");
   const [accessCodePromptOpen, setAccessCodePromptOpen] = useState(false);
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(() => window.localStorage.getItem(DISCLAIMER_STORAGE_KEY) === "true");
+  const chatContainerRef = useRef(null);
 
   const generatedThreadId = useMemo(() => {
     const safeName = companyName.trim().replace(/\s+/g, "-") || "company";
@@ -1337,6 +1523,26 @@ export default function App() {
       .then((data) => setReportChatHistory(data.items || []))
       .catch(() => setReportChatError("历史追问加载失败，本次仍可继续提问。"));
   }, [reportTask?.task_id, reportTask?.status, reportResult?.markdown_report, accessCodePromptOpen]);
+
+  // Auto-scroll chat container to latest message
+  useEffect(() => {
+    if (reportChatHistory.length > 0 && chatContainerRef.current) {
+      const container = chatContainerRef.current;
+      requestAnimationFrame(() => {
+        container.scrollTop = container.scrollHeight;
+      });
+    }
+  }, [reportChatHistory.length]);
+
+  // Close fullscreen report on Escape
+  useEffect(() => {
+    if (!reportExpanded) return;
+    function onKeyDown(e) {
+      if (e.key === "Escape") setReportExpanded(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [reportExpanded]);
 
   useEffect(() => {
     let mounted = true;
@@ -1455,6 +1661,7 @@ export default function App() {
         }),
       });
       setReportTask(task);
+      setReportStartedAt(Date.now());
 
       let taskResult = null;
       for (let attempt = 0; attempt < 180; attempt += 1) {
@@ -1491,6 +1698,7 @@ export default function App() {
       }
     } finally {
       setLoading("");
+      setReportStartedAt(null);
     }
   }
 
@@ -1516,12 +1724,29 @@ export default function App() {
       };
       if (reportTask?.task_id) {
         payload.task_id = reportTask.task_id;
+        // 后端优先从 task 存储读取报告，避免每次追问传输全文
+      } else {
+        payload.markdown_report = reportResult.markdown_report;
       }
-      payload.markdown_report = reportResult.markdown_report;
-      const answer = await requestJson("/chat/report", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      let answer;
+      try {
+        answer = await requestJson("/chat/report", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      } catch (firstErr) {
+        // 如果 task 丢失（如 DB 重置），带上报告全文重试一次
+        const msg = String(firstErr.message || "");
+        if (payload.task_id && !payload.markdown_report && msg.includes("task not found")) {
+          payload.markdown_report = reportResult.markdown_report;
+          answer = await requestJson("/chat/report", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+        } else {
+          throw firstErr;
+        }
+      }
       setReportChatHistory((items) => [
         ...items,
         {
@@ -1568,6 +1793,10 @@ export default function App() {
     setHighlightedReportSection(sectionId);
     window.document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
     window.setTimeout(() => setHighlightedReportSection(""), 2200);
+  }
+
+  function deleteChatMessage(messageId) {
+    setReportChatHistory((items) => items.filter((item) => item.id !== messageId));
   }
 
   async function addWatchlistCompany() {
@@ -1739,6 +1968,22 @@ export default function App() {
           </div>
         </button>
         <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={classNames(
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
+              backendOnline
+                ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+                : "border-red-400/30 bg-red-400/10 text-red-200",
+            )}
+          >
+            <span
+              className={classNames(
+                "h-2 w-2 rounded-full",
+                backendOnline ? "bg-emerald-400" : "bg-red-400",
+              )}
+            />
+            {backendOnline ? "后端在线" : "后端离线"}
+          </span>
           {runtimeConfig?.debug_routes_enabled && (
             <button
               className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:border-cyan-400 hover:text-cyan-200"
@@ -1752,8 +1997,16 @@ export default function App() {
       </header>
 
       {error && (
-        <div className="mb-4 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-          {error}
+        <div className="mb-4 flex items-start gap-3 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          <span className="flex-1">{error}</span>
+          <button
+            className="mt-0.5 shrink-0 rounded p-0.5 text-red-300 hover:bg-red-500/20 hover:text-red-100"
+            onClick={() => setError("")}
+            type="button"
+            title="关闭"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
       )}
 
@@ -1875,7 +2128,32 @@ export default function App() {
                 <input
                   className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-cyan-400"
                   value={companyName}
-                  onChange={(event) => syncTickerFromCompany(event.target.value)}
+                  onChange={(event) => {
+                    syncTickerFromCompany(event.target.value);
+                    setCandidateFocusIndex(-1);
+                  }}
+                  onKeyDown={(event) => {
+                    if (!symbolCandidates.length) return;
+                    const max = Math.min(symbolCandidates.length, 5) - 1;
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setCandidateFocusIndex((prev) => (prev < max ? prev + 1 : 0));
+                    } else if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setCandidateFocusIndex((prev) => (prev > 0 ? prev - 1 : max));
+                    } else if (event.key === "Enter" && candidateFocusIndex >= 0) {
+                      event.preventDefault();
+                      const candidate = symbolCandidates[candidateFocusIndex];
+                      if (candidate) {
+                        selectSymbolCandidate(candidate);
+                        setCandidateFocusIndex(-1);
+                      }
+                    } else if (event.key === "Escape") {
+                      setCandidateFocusIndex(-1);
+                      setSymbolCandidates([]);
+                      setSymbolLookupStatus("idle");
+                    }
+                  }}
                   placeholder="输入公司名、简称、拼音或股票代码，例如 美团、阿里、BABA"
                 />
               </label>
@@ -1914,16 +2192,18 @@ export default function App() {
               <div className="mt-3 rounded-md border border-slate-800 bg-slate-950/70 p-3">
                 <div className="mb-2 text-xs text-slate-500">候选股票</div>
                 <div className="grid gap-2">
-                  {symbolCandidates.slice(0, 5).map((candidate) => (
+                  {symbolCandidates.slice(0, 5).map((candidate, idx) => (
                     <button
                       className={classNames(
                         "rounded-md border px-3 py-2 text-left text-sm transition",
-                        ticker === (candidate.ticker || candidate.symbol)
+                        ticker === (candidate.ticker || candidate.symbol) || idx === candidateFocusIndex
                           ? "border-cyan-400 bg-cyan-500/10 text-cyan-100"
                           : "border-slate-700 text-slate-300 hover:border-cyan-400 hover:text-cyan-200",
                       )}
                       key={`${candidate.symbol}-${candidate.exchange}`}
                       onClick={() => selectSymbolCandidate(candidate)}
+                      onMouseEnter={() => setCandidateFocusIndex(idx)}
+                      onMouseLeave={() => setCandidateFocusIndex(-1)}
                       type="button"
                     >
                       <span className="flex flex-wrap items-center justify-between gap-2">
@@ -2001,31 +2281,43 @@ export default function App() {
 
         <aside className="space-y-4">
           <Panel title="投研报告生成" icon={FileText}>
-            <ReportTaskProgress task={reportTask} />
+            <ReportTaskProgress task={reportTask} startedAt={reportStartedAt} />
             {reportResult ? (
               <div className="mt-4 space-y-4">
-                <div className="grid grid-cols-3 gap-2">
-                  <MetricCard label="Decision" value={reportResult.final_report?.recommendation} icon={TrendingUp} />
-                  <MetricCard label="Confidence" value={reportResult.final_report?.confidence} icon={ShieldCheck} />
-                  <MetricCard label="Sources" value={reportResult.final_report?.sources_count} icon={Database} />
+                <div className="sticky top-0 z-10 -mx-1 space-y-3 bg-slate-900/95 px-1 pb-3 backdrop-blur-sm">
+                  <div className="grid grid-cols-3 gap-2">
+                    <MetricCard label="Decision" value={reportResult.final_report?.recommendation} icon={TrendingUp} />
+                    <MetricCard label="Confidence" value={reportResult.final_report?.confidence} icon={ShieldCheck} />
+                    <MetricCard label="Sources" value={reportResult.final_report?.sources_count} icon={Database} />
+                  </div>
+                  <ExecutiveSummaryCard content={reportResult.markdown_report} />
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <SourceQualitySummary sourceQuality={reportResult.source_quality} />
+                    <ReportEditorSummary editor={reportResult.report_editor} />
+                  </div>
+                  <div className="rounded-md border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
+                    本报告为研究辅助输出，不构成投资建议。请结合交易所公告、公司财报与专业判断复核。
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-cyan-300/40 bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-300"
+                      onClick={exportReportPdf}
+                      type="button"
+                    >
+                      <Download className="h-4 w-4" />
+                      导出报告 PDF
+                    </button>
+                    <button
+                      className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-200 hover:border-slate-400 hover:bg-slate-700"
+                      onClick={() => setReportExpanded(true)}
+                      type="button"
+                      title="全屏阅读报告"
+                    >
+                      <Maximize2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
-                <ExecutiveSummaryCard content={reportResult.markdown_report} />
-                <div className="grid gap-3 lg:grid-cols-2">
-                  <SourceQualitySummary sourceQuality={reportResult.source_quality} />
-                  <ReportEditorSummary editor={reportResult.report_editor} />
-                </div>
-                <div className="rounded-md border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
-                  本报告为研究辅助输出，不构成投资建议。请结合交易所公告、公司财报与专业判断复核。
-                </div>
-                <button
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-cyan-300/40 bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-300"
-                  onClick={exportReportPdf}
-                  type="button"
-                >
-                  <Download className="h-4 w-4" />
-                  导出报告 PDF
-                </button>
-                <div className="max-h-[520px] overflow-auto rounded-md border border-slate-800 bg-slate-950 p-4 text-sm leading-6 text-slate-300">
+                <div className="max-h-[620px] overflow-auto rounded-md border border-slate-800 bg-slate-950 p-4 text-sm leading-6 text-slate-300 custom-scrollbar">
                   <MarkdownReport content={reportResult.markdown_report} highlightedSectionId={highlightedReportSection} />
                 </div>
                 <div className="space-y-3 rounded-md border border-cyan-400/20 bg-slate-950/80 p-4">
@@ -2084,17 +2376,33 @@ export default function App() {
                     </button>
                   </div>
                   {reportChatError && (
-                    <div className="rounded-md border border-red-400/25 bg-red-400/10 px-3 py-2 text-sm text-red-100">
-                      {reportChatError}
+                    <div className="flex items-start gap-2 rounded-md border border-red-400/25 bg-red-400/10 px-3 py-2 text-sm text-red-100">
+                      <span className="flex-1">{reportChatError}</span>
+                      <button
+                        className="shrink-0 rounded p-0.5 text-red-300 hover:bg-red-500/20 hover:text-red-100"
+                        onClick={() => setReportChatError("")}
+                        type="button"
+                        title="关闭"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
                     </div>
                   )}
                   {reportChatHistory.length > 0 && (
-                    <div className="space-y-3">
+                    <div className="max-h-[400px] space-y-3 overflow-y-auto scroll-smooth custom-scrollbar" ref={chatContainerRef}>
                       {reportChatHistory.map((item) => {
                         const itemKey = item.message_id || item.id || `${item.created_at}-${item.question}`;
                         return (
-                        <article className="rounded-md border border-slate-800 bg-slate-900/80 p-3" key={itemKey}>
-                          <div className="flex flex-wrap items-center gap-2 text-xs uppercase text-cyan-300">
+                        <article className="group relative rounded-md border border-slate-800 bg-slate-900/80 p-3" key={itemKey}>
+                          <button
+                            className="absolute right-2 top-2 rounded p-1 text-slate-600 opacity-0 hover:bg-slate-800 hover:text-red-300 group-hover:opacity-100"
+                            onClick={() => deleteChatMessage(item.id)}
+                            type="button"
+                            title="删除此条追问"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                          <div className="flex flex-wrap items-center gap-2 text-xs uppercase text-cyan-300 pr-6">
                             <span>{item.strategy}</span>
                             <span className="rounded bg-slate-800 px-2 py-0.5 text-slate-400">{item.search_mode || item.route?.mode}</span>
                             {item.route?.web_status && item.route.web_status !== "not_requested" && (
@@ -2248,6 +2556,73 @@ export default function App() {
           <MarkdownReport content={reportResult.markdown_report} printMode />
         </div>
       )}
+
+      {/* Fullscreen report viewer */}
+      {reportExpanded && reportResult?.markdown_report && (() => {
+        const toc = extractReportTOC(reportResult.markdown_report);
+        return (
+        <div className="modal-enter fixed inset-0 z-50 flex flex-col bg-slate-950" role="dialog" aria-modal="true">
+          <div className="flex items-center justify-between gap-4 border-b border-slate-800 px-6 py-4">
+            <div>
+              <h2 className="text-lg font-bold text-slate-100">{selectedCompanyName} 投研报告</h2>
+              <div className="mt-1 flex gap-4 text-xs text-slate-500">
+                <span>决策：{reportResult.final_report?.recommendation || "N/A"}</span>
+                <span>置信度：{reportResult.final_report?.confidence ?? "N/A"}</span>
+                <span>来源：{reportResult.final_report?.sources_count ?? 0}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                className="inline-flex items-center gap-2 rounded-md border border-cyan-300/40 bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-300"
+                onClick={exportReportPdf}
+                type="button"
+              >
+                <Download className="h-4 w-4" />
+                导出 PDF
+              </button>
+              <button
+                className="rounded-md p-2 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                onClick={() => setReportExpanded(false)}
+                type="button"
+                title="关闭全屏"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-1 overflow-hidden">
+            {toc.length > 1 && (
+              <aside className="custom-scrollbar w-56 shrink-0 overflow-y-auto border-r border-slate-800 px-4 py-6">
+                <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase text-slate-500">
+                  <BookOpen className="h-3.5 w-3.5" />
+                  目录
+                </div>
+                <nav className="space-y-1">
+                  {toc.map((item) => (
+                    <button
+                      className={classNames(
+                        "block w-full rounded px-2 py-1.5 text-left text-xs leading-5 transition hover:bg-slate-800/60 hover:text-slate-100",
+                        item.level === 1 ? "font-medium text-slate-300" : "pl-5 text-slate-400",
+                      )}
+                      key={item.id}
+                      onClick={() => jumpToReportCitation(item.id)}
+                      type="button"
+                    >
+                      {item.title}
+                    </button>
+                  ))}
+                </nav>
+              </aside>
+            )}
+            <div className="flex-1 overflow-auto px-6 py-6 custom-scrollbar">
+              <div className="mx-auto max-w-3xl">
+                <MarkdownReport content={reportResult.markdown_report} highlightedSectionId={highlightedReportSection} />
+              </div>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
     </div>
   );
 }
