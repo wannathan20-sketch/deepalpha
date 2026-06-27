@@ -414,12 +414,25 @@ class YFinanceProvider(_ImportProvider):
     resilient from cloud IP ranges where the v8 API may be rate-limited.
     封装 yfinance，相比直接调 Yahoo v8 API，yfinance 对云服务器 IP 更宽容，
     可作为美股和港股的可靠兜底。
+    The provider silently becomes unavailable when yfinance cannot be imported
+    (missing dependency / broken env), so the backend still starts.
+    当 yfinance 无法导入时静默标记为不可用，不影响后端启动。
     """
     name = "yfinance"
     module_name = "yfinance"
+    _import_ok: bool | None = None
 
     def supports(self, market: str) -> bool:
         return market in {"us", "hk", "cn"}
+
+    def is_available(self) -> bool:
+        if self._import_ok is None:
+            try:
+                self._module()
+                self._import_ok = True
+            except Exception:
+                self._import_ok = False
+        return self._import_ok
 
     def fetch_chart(self, request: MarketChartRequest) -> dict:
         yf = self._module()
