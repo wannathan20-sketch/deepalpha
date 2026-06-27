@@ -25,8 +25,9 @@ def analyze(company_name: str, context: dict) -> dict:
     memory_text = build_memory_text(context.get("memory", {}))
     summary = generate_text(
         prompt=(
-            f"请基于以下本地 RAG 检索上下文，为 {company_name} 生成行业研究分析。\n"
-            "请覆盖行业空间、竞争格局、监管环境、结构性机会和主要风险。\n\n"
+            f"请参考以下资料，为 {company_name} 生成行业研究分析。\n"
+            "请覆盖行业空间、竞争格局、监管环境、结构性机会和主要风险。\n"
+            "不要提及「RAG」「检索」「上下文」「本地」等内部术语，直接给出分析结论。\n\n"
             f"{memory_text}\n\n"
             f"{context_text}"
         ),
