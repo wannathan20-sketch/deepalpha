@@ -89,6 +89,16 @@ AKSHARE_FINANCIAL_FIELDS = [
     "total_liabilities",
     "shareholders_equity",
 ]
+
+# Core fields that must all be present for "available" status.
+# Non-core fields (debt breakdown, balance sheet, cash flow) often come from
+# supplementary statements that AkShare may not return for every symbol.
+CORE_FINANCIAL_FIELDS = [
+    "revenue",
+    "net_income",
+    "gross_margin_percent",
+    "net_margin_percent",
+]
 ANNOUNCEMENT_TYPES = [
     "财务报告",
     "重大事项",
@@ -604,13 +614,15 @@ AKSHARE_FIELD_CANDIDATES = {
         "OPERATE_INCOME",
         "营业总收入",
         "营业收入",
-        "主营业务收入",
         "主营业务收入(万元)",
-        "收入",
         "营业额",
         "Revenue",
     ],
-    "gross_profit": ["GROSS_PROFIT", "毛利润", "毛利", "Gross Profit"],
+    "gross_profit": [
+        "GROSS_PROFIT",
+        "主营业务利润(元)",
+        "Gross Profit",
+    ],
     "net_income": [
         "PARENT_NETPROFIT",
         "NETPROFIT",
@@ -620,12 +632,38 @@ AKSHARE_FIELD_CANDIDATES = {
         "归母净利润",
         "净利润",
         "净利润(万元)",
+        "扣除非经常性损益后的净利润(元)",
         "Net Profit",
     ],
-    "gross_margin_percent": ["GROSS_PROFIT_RATIO", "销售毛利率", "销售毛利率(%)", "毛利率", "Gross Margin"],
-    "net_margin_percent": ["NETPROFIT_MARGIN", "销售净利率", "销售净利率(%)", "净利率", "Net Margin"],
-    "roe_percent": ["ROE_WEIGHT", "ROE", "ROE_AVG", "加权净资产收益率", "净资产收益率", "净资产收益率(%)"],
-    "debt_to_asset_percent": ["DEBT_ASSET_RATIO", "资产负债率", "资产负债率(%)"],
+    "gross_margin_percent": [
+        "GROSS_PROFIT_RATIO",
+        "主营业务利润率(%)",
+        "销售毛利率",
+        "销售毛利率(%)",
+        "毛利率",
+        "Gross Margin",
+    ],
+    "net_margin_percent": [
+        "NETPROFIT_MARGIN",
+        "销售净利率",
+        "销售净利率(%)",
+        "净利率",
+        "Net Margin",
+    ],
+    "roe_percent": [
+        "ROE_WEIGHT",
+        "ROE",
+        "ROE_AVG",
+        "加权净资产收益率(%)",
+        "加权净资产收益率",
+        "净资产收益率(%)",
+        "净资产收益率",
+    ],
+    "debt_to_asset_percent": [
+        "DEBT_ASSET_RATIO",
+        "资产负债率",
+        "资产负债率(%)",
+    ],
     "operating_cash_flow": [
         "NETCASH_OPERATE",
         "经营活动产生的现金流量净额",
@@ -635,11 +673,24 @@ AKSHARE_FIELD_CANDIDATES = {
         "经营现金净流量(万元)",
         "Operating Cash Flow",
     ],
-    "total_assets": ["TOTAL_ASSETS", "资产总计", "总资产", "Total Assets"],
-    "total_liabilities": ["TOTAL_LIABILITIES", "负债合计", "总负债", "Total Liabilities"],
+    "total_assets": [
+        "TOTAL_ASSETS",
+        "资产总计",
+        "总资产(元)",
+        "总资产",
+        "Total Assets",
+    ],
+    "total_liabilities": [
+        "TOTAL_LIABILITIES",
+        "负债合计",
+        "总负债",
+        "Total Liabilities",
+    ],
     "eps_diluted": [
         "DILUTED_EPS",
         "DILUTEDEPS",
+        "摊薄每股收益(元)",
+        "每股收益_调整后(元)",
         "稀释每股收益",
         "稀释每股收益(元)",
         "基本每股收益",
@@ -648,6 +699,7 @@ AKSHARE_FIELD_CANDIDATES = {
     "operating_income": [
         "OPERATE_PROFIT",
         "OPERATING_PROFIT",
+        "营业利润(元)",
         "营业利润",
         "营业利润(万元)",
     ],
@@ -730,6 +782,11 @@ def _akshare_values_from_record(
         values["debt_to_asset_percent"] = _pct(values["total_liabilities"], values["total_assets"])
     if values["revenue"] and values["gross_margin_percent"] is not None and values["gross_profit"] is None:
         values["gross_profit"] = _round_number(values["revenue"] * values["gross_margin_percent"] / 100)
+    # Derive revenue from 主营业务利润(元) / 主营业务利润率(%) when the
+    # legacy stock_financial_analysis_indicator is the only available source
+    # (it reports main-business profit and margin but not absolute revenue).
+    if values["revenue"] is None and values["gross_profit"] is not None and values["gross_margin_percent"]:
+        values["revenue"] = _round_number(values["gross_profit"] / (values["gross_margin_percent"] / 100))
     if values["revenue"] and values["operating_income"] is not None:
         values["operating_margin_percent"] = _pct(values["operating_income"], values["revenue"])
     return values
@@ -752,6 +809,7 @@ def _akshare_profile_from_values(
     capital_flow_context: dict | None = None,
 ) -> dict:
     missing_fields = [field for field in AKSHARE_FINANCIAL_FIELDS if values.get(field) is None]
+    missing_core = [field for field in CORE_FINANCIAL_FIELDS if values.get(field) is None]
     has_metric = any(value is not None for value in values.values())
     if not has_metric and not announcements:
         status = "fetch_failed" if errors else "missing"
@@ -766,7 +824,7 @@ def _akshare_profile_from_values(
             "summary": [reason],
         }
 
-    status = "partial" if missing_fields or not has_metric else "available"
+    status = "partial" if missing_core else "available"
     # Build announcement summary grouped by classified type
     ann_summary: dict[str, list[dict]] = {}
     for ann in announcements:
@@ -1132,6 +1190,7 @@ def _fetch_cn_segment_data(ak: object, symbol: MarketSymbol) -> dict:
         latest_date = str(df["报告日期"].max())
         latest_df = df[df["报告日期"].astype(str) == latest_date]
         segment["enabled"] = True
+        segment["quantitative"] = True
         segment["source"] = "akshare_stock_zygc_em"
         segment["report_date"] = latest_date
         category_map = {"按产品分类": "by_product", "按行业分类": "by_industry", "按地区分类": "by_region"}
