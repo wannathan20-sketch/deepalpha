@@ -17,10 +17,10 @@ jobs:
       github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     env:
-      ZEABUR_PROJECT_ID: 6a1e814b8fd5d6b81d7ad706
-      ZEABUR_SERVICE_ID: 6a1e8248d8f8814aa285d8a6
-      ZEABUR_ENVIRONMENT_ID: 6a1e814bb0fc054c4cc406d0
-      BACKEND_HEALTH_URL: https://deepalpha.zeabur.app/health
+      ZEABUR_PROJECT_ID: ${{ vars.ZEABUR_PROJECT_ID }}
+      ZEABUR_SERVICE_ID: ${{ vars.ZEABUR_SERVICE_ID }}
+      ZEABUR_ENVIRONMENT_ID: ${{ vars.ZEABUR_ENVIRONMENT_ID }}
+      BACKEND_HEALTH_URL: ${{ vars.BACKEND_HEALTH_URL }}
       TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - name: Checkout tested commit
@@ -38,6 +38,10 @@ jobs:
           ZEABUR_TOKEN: ${{ secrets.ZEABUR_TOKEN }}
         run: |
           test -n "$ZEABUR_TOKEN"
+          test -n "$ZEABUR_PROJECT_ID"
+          test -n "$ZEABUR_SERVICE_ID"
+          test -n "$ZEABUR_ENVIRONMENT_ID"
+          test -n "$BACKEND_HEALTH_URL"
 
       - name: Authenticate Zeabur
         env:

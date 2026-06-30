@@ -6,6 +6,16 @@ DeepAlpha 是一个面向 A 股、港股和美股的多智能体投研系统。�
 
 当前项目定位是“研究辅助工具”和“投研工作流原型”。它可以帮助整理公开信息、形成分析框架、暴露数据缺口，但不提供投资建议、交易指令或收益承诺。
 
+## 项目交付目标
+
+本仓库按可复现的开源工程组织，目标是让使用者在本地完成安装、启动、验证和基础演示：
+
+- 本地复现：clone 仓库后按文档启动后端和前端，使用开发模式的 mock provider 跑通主要流程。
+- 网页演示：通过前端工作台展示证券检索、候选标的、行情图表、报告生成、历史记录和 Watchlist。
+- 可配置生产运行：在配置真实 LLM、搜索和行情相关 Key 后，使用真实数据源生成研究辅助报告。
+
+默认配置采用 `APP_ENV=development`、`LLM_PROVIDER=mock`、`SEARCH_PROVIDER=mock`，无需真实 API Key 即可启动项目并完成流程演示。生产模式必须配置真实 LLM 与搜索 provider；系统不会在生产环境用 mock 数据替代失败的真实来源。
+
 ## 核心能力
 
 - 多市场支持：A 股、港股、美股的证券识别、行情路由、市场复盘和图表展示。
@@ -104,6 +114,28 @@ ETF 代理的涨跌幅可用于轻量复盘，但 ETF 收盘价不是指数点�
 
 ## 快速开始
 
+### 本地快速启动
+
+```bash
+git clone https://github.com/wannathan20-sketch/deepalpha.git
+cd deepalpha
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+uvicorn app.main:app --reload
+```
+
+另开一个终端启动前端：
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+打开 Vite 输出的本地地址后，可使用 `Tesla`、`NVDA`、`腾讯` 或 `贵州茅台` 验证检索、行情和报告流程。开发模式使用 mock LLM/search，适合功能演示和代码评审；实时行情仍依赖外部免费数据源，接口会通过数据质量字段标记限流、缺失或降级情况。
+
 ### 后端
 
 建议使用 Python 3.11 或 3.12。
@@ -124,6 +156,13 @@ uvicorn app.main:app --reload
 - OpenAPI: `http://127.0.0.1:8000/docs`
 - Health check: `http://127.0.0.1:8000/health`
 
+可用以下命令做最小检查：
+
+```bash
+curl http://127.0.0.1:8000/health
+curl "http://127.0.0.1:8000/symbol/lookup?query=Tesla"
+```
+
 ### 前端
 
 ```bash
@@ -137,6 +176,15 @@ npm run dev
 ```env
 VITE_API_BASE=https://api.deepalpha.best
 ```
+
+### 前端演示路径
+
+1. 输入公司名称或证券代码，例如 `Tesla`、`NVDA`、`腾讯`、`贵州茅台`。
+2. 查看候选证券，确认市场、交易所和标准化代码。
+3. 查看行情 provider、图表区域、fallback 记录和数据质量状态。
+4. 创建报告任务，等待多 Agent 工作流生成 Markdown 报告。
+5. 查看报告正文、历史记录、报告追问和来源质量提示。
+6. 使用 Watchlist 导入或保存关注标的。
 
 ### Watchlist 智能导入
 
@@ -252,15 +300,19 @@ SEC_USER_AGENT=DeepAlpha production contact@example.com
 | `GET` | `/memory/history` | 查询研究历史 |
 | `GET` / `POST` | `/memory/watchlist` | 查询或新增关注标的 |
 
-## CI 全绿后部署 Zeabur
+## 可选部署：CI 通过后发布到 Zeabur
 
-仓库包含 `.github/workflows/deploy.yml`。它只会在 `main` 分支的 `CI` workflow 成功完成后运行，部署被 CI 验证过的同一个 commit 到 Zeabur 后端服务，并对 `/health` 做冒烟测试。
+仓库提供 `.github/workflows/deploy.yml` 作为后端自动部署示例。该 workflow 只在 `main` 分支的 `CI` workflow 成功完成后触发，部署同一个已验证 commit 到 Zeabur，并对后端 `/health` 进行冒烟检查。本地运行项目不需要启用该 workflow。
 
 启用前需要：
 
 1. 在 GitHub 仓库 Secrets 中添加 `ZEABUR_TOKEN`。
-2. 在 Zeabur 控制台关闭该服务的原生 Git 自动部署，避免绕过 CI 门禁重复上线。
-3. 保持后端服务的 Zeabur project/service/environment ID 与 workflow 中配置一致。
+2. 在 GitHub 仓库 Variables 中配置：
+   - `ZEABUR_PROJECT_ID`
+   - `ZEABUR_SERVICE_ID`
+   - `ZEABUR_ENVIRONMENT_ID`
+   - `BACKEND_HEALTH_URL`
+3. 在 Zeabur 控制台关闭该服务的原生 Git 自动部署，确保发布路径只经过 CI 门禁。
 
 ## 自定义域名
 
@@ -392,6 +444,7 @@ pytest -q
 
 ```bash
 cd frontend
+npm run test:stock
 npm run build
 ```
 
@@ -421,10 +474,34 @@ docker run --env-file .env -p 8000:8000 deepalpha
 
 ## 安全与仓库规范
 
-- `.env`、数据库、Chroma 数据目录、前端构建产物和本地过程文档不应提交到 Git。
-- README 和 env 示例只保留占位值，真实 API Key 应配置在部署平台的环境变量中。
-- 生产环境请设置 `APP_ENV=production`，并关闭 `ENABLE_DEBUG_ROUTES`。
-- 公开体验版建议启用 `DEEPALPHA_ACCESS_CODE` 和报告限流，避免 LLM 与搜索 API 被滥用。
+仓库只应提交源码、测试、示例配置和部署模板。以下内容必须保留在本地或部署平台中：
+
+- `.env`、个人环境变量文件、真实 API Key 和访问码。
+- SQLite 数据库、Chroma 数据目录、前端构建产物和依赖目录。
+- 本地过程文档、调试记录、临时报告和私有部署信息。
+
+公开发布前建议执行：
+
+```bash
+git status --short
+git ls-files -ci --exclude-standard
+```
+
+第一条命令用于确认待提交变更，第二条命令用于检查是否仍有被 `.gitignore` 忽略的文件处于 Git 跟踪状态。
+
+生产部署要求：
+
+- `APP_ENV=production`。
+- `ENABLE_DEBUG_ROUTES=false`。
+- 真实 API Key 只配置在部署平台的环境变量或 GitHub Secrets/Variables 中。
+- 对公开演示环境启用 `DEEPALPHA_ACCESS_CODE` 和报告限流，降低 LLM 与搜索 API 滥用风险。
+
+当前仓库不应包含：
+
+- 本地 `.env` 或其它真实环境变量文件。
+- `data/*.sqlite3`、`data/*.db`、`data/chroma/`。
+- `frontend/dist/`、`frontend/node_modules/`。
+- `PROJECT_STATE.md`、`docs/superpowers/`、`DeepAlpha_*.md` 等过程资料。
 
 ## 已知限制
 

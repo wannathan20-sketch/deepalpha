@@ -20,11 +20,15 @@ def test_deploy_workflow_uses_zeabur_backend_service_and_smoke_check() -> None:
     content = WORKFLOW.read_text(encoding="utf-8")
 
     assert "ZEABUR_TOKEN" in content
-    assert "6a1e814b8fd5d6b81d7ad706" in content
-    assert "6a1e8248d8f8814aa285d8a6" in content
-    assert "6a1e814bb0fc054c4cc406d0" in content
+    assert "vars.ZEABUR_PROJECT_ID" in content
+    assert "vars.ZEABUR_SERVICE_ID" in content
+    assert "vars.ZEABUR_ENVIRONMENT_ID" in content
+    assert "vars.BACKEND_HEALTH_URL" in content
+    assert "6a1e814b8fd5d6b81d7ad706" not in content
+    assert "6a1e8248d8f8814aa285d8a6" not in content
+    assert "6a1e814bb0fc054c4cc406d0" not in content
     assert "deployment list" in content
     assert "commitSHA" in content
     assert "RUNNING" in content
     assert "zeabur" in content
-    assert "/health" in content
+    assert 'curl -fsS "$BACKEND_HEALTH_URL"' in content
