@@ -286,7 +286,7 @@ def test_nasdaq_adapter_maps_composite_index(monkeypatch) -> None:
 
     result = NasdaqProvider().fetch_chart(provider_request("^IXIC"))
 
-    assert [point["close"] for point in result["points"]] == [25587.04, 25476.64]
+    assert [point["close"] for point in result["points"]] == [25607.48, 25613.18]
     assert result["instrument_type"] == "index"
     assert "proxy_symbol" not in result
 
@@ -334,9 +334,12 @@ def test_nasdaq_adapter_marks_etf_proxies(
 
 
 def test_nasdaq_adapter_fetches_individual_stocks(monkeypatch) -> None:
-    """NasdaqProvider should now request individual stocks via assetclass=stocks,
-    not return empty for unmapped symbols."""
+    """NasdaqProvider should now request individual stocks via assetclass=stocks
+    and use full chart data when available."""
     import time as _time
+
+    now_ms = int(_time.time() * 1000)
+    day_ms = 86_400_000
 
     class Response:
         def raise_for_status(self) -> None:
@@ -346,8 +349,12 @@ def test_nasdaq_adapter_fetches_individual_stocks(monkeypatch) -> None:
             return {
                 "data": {
                     "chart": [
-                        {"x": int(_time.time() * 1000) - 86_400_000, "y": 280.0},
-                        {"x": int(_time.time() * 1000), "y": 281.74},
+                        {"x": now_ms - day_ms * 5, "y": 275.0},
+                        {"x": now_ms - day_ms * 4, "y": 278.0},
+                        {"x": now_ms - day_ms * 3, "y": 282.0},
+                        {"x": now_ms - day_ms * 2, "y": 280.0},
+                        {"x": now_ms - day_ms, "y": 283.78},
+                        {"x": now_ms, "y": 281.74},
                     ],
                     "lastSalePrice": "$281.74",
                     "previousClose": "$283.78",
@@ -366,15 +373,18 @@ def test_nasdaq_adapter_fetches_individual_stocks(monkeypatch) -> None:
 
     result = NasdaqProvider().fetch_chart(provider_request("AAPL"))
 
-    assert result["points"] != []
+    assert len(result["points"]) == 6
+    assert result["points"][0]["close"] == 275.0
     assert result["symbol"] == "AAPL"
     assert result["instrument_type"] == "stock"
     assert kwargs_captured["params"]["assetclass"] == "stocks"
 
 
 def test_nasdaq_adapter_still_handles_review_indices(monkeypatch) -> None:
-    """^GSPC should still be mapped to SPY ETF proxy."""
+    """^GSPC should still be mapped to SPY ETF proxy and use chart data."""
     import time as _time
+
+    now_ms = int(_time.time() * 1000)
 
     class Response:
         def raise_for_status(self) -> None:
@@ -384,8 +394,8 @@ def test_nasdaq_adapter_still_handles_review_indices(monkeypatch) -> None:
             return {
                 "data": {
                     "chart": [
-                        {"x": int(_time.time() * 1000) - 86_400_000, "y": 600.0},
-                        {"x": int(_time.time() * 1000), "y": 605.0},
+                        {"x": now_ms - 86_400_000, "y": 600.0},
+                        {"x": now_ms, "y": 605.0},
                     ],
                     "lastSalePrice": "$605.00",
                     "previousClose": "$602.00",
@@ -396,10 +406,35 @@ def test_nasdaq_adapter_still_handles_review_indices(monkeypatch) -> None:
 
     result = NasdaqProvider().fetch_chart(provider_request("^GSPC"))
 
-    assert result["points"] != []
+    assert len(result["points"]) == 2
     assert result["symbol"] == "SPY"
     assert result["instrument_type"] == "etf_proxy"
     assert result["proxy_for"] == "^GSPC"
+
+
+def test_nasdaq_adapter_falls_back_when_chart_empty(monkeypatch) -> None:
+    """When chart data is empty, fall back to synthetic 2-point row from
+    lastSalePrice + previousClose."""
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "data": {
+                    "chart": [],
+                    "lastSalePrice": "$281.74",
+                    "previousClose": "$283.78",
+                    "volume": "66,427,169",
+                }
+            }
+
+    monkeypatch.setattr("app.tools.market_providers.requests.get", lambda *a, **kw: Response())
+
+    result = NasdaqProvider().fetch_chart(provider_request("AAPL"))
+
+    assert len(result["points"]) == 2
+    assert result["points"][1]["close"] == 281.74
 
 
 def test_finnhub_adapter_maps_candles(monkeypatch) -> None:

@@ -233,25 +233,29 @@ class NasdaqProvider:
         response.raise_for_status()
         data = response.json().get("data") or {}
         chart = data.get("chart") or []
-        latest_close = _formatted_number(data.get("lastSalePrice"))
-        previous_close = _formatted_number(data.get("previousClose"))
-        if latest_close is not None and previous_close is not None:
-            latest_timestamp = (
-                _timestamp(chart[-1].get("x")) if chart else None
-            ) or int(datetime.now(timezone.utc).timestamp())
+        if chart:
+            # Full intraday / daily close series — preferred.
+            # Nasdaq chart format: [{x: timestamp_ms, y: close}, ...]
             rows = [
-                {"time": latest_timestamp - 86_400, "close": previous_close},
-                {
-                    "time": latest_timestamp,
-                    "close": latest_close,
-                    "volume": _formatted_number(data.get("volume")),
-                },
-            ]
-        else:
-            rows = [
-                {"time": item.get("x"), "close": item.get("y")}
+                {"time": int(item["x"] / 1000), "close": item["y"]}
                 for item in chart
             ]
+        else:
+            # Fallback: synthetic 2-point row from last / previous close.
+            latest_close = _formatted_number(data.get("lastSalePrice"))
+            previous_close = _formatted_number(data.get("previousClose"))
+            if latest_close is not None and previous_close is not None:
+                now_ts = int(datetime.now(timezone.utc).timestamp())
+                rows = [
+                    {"time": now_ts - 86_400, "close": previous_close},
+                    {
+                        "time": now_ts,
+                        "close": latest_close,
+                        "volume": _formatted_number(data.get("volume")),
+                    },
+                ]
+            else:
+                rows = []
         result = {
             "symbol": symbol,
             "exchange": "US",
