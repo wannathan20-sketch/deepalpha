@@ -58,19 +58,64 @@ def is_production() -> bool:
     return get_app_environment() == "production"
 
 
+# Providers that require an API key in production (Ollama is the only one that doesn't).
+_PROVIDER_KEY_MAP: dict[str, str] = {
+    "openai": "OPENAI_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "dashscope": "DASHSCOPE_API_KEY",
+    "zhipuai": "ZHIPUAI_API_KEY",
+    "aihubmix": "AIHUBMIX_API_KEY",
+}
+
+
+def _get_provider_model(llm_provider: str) -> str:
+    """Return the configured model name for a given provider."""
+    defaults = {
+        "openai": "gpt-5",
+        "deepseek": "deepseek-chat",
+        "anthropic": "claude-sonnet-4-6",
+        "gemini": "gemini-2.5-flash",
+        "ollama": "llama3",
+        "dashscope": "qwen-plus",
+        "zhipuai": "glm-4-flash",
+        "aihubmix": "deepseek-chat",
+    }
+    env_map = {
+        "openai": "OPENAI_MODEL",
+        "deepseek": "DEEPSEEK_MODEL",
+        "anthropic": "ANTHROPIC_MODEL",
+        "gemini": "GEMINI_MODEL",
+        "ollama": "OLLAMA_MODEL",
+        "dashscope": "DASHSCOPE_MODEL",
+        "zhipuai": "ZHIPUAI_MODEL",
+        "aihubmix": "AIHUBMIX_MODEL",
+    }
+    env_var = env_map.get(llm_provider)
+    default_model = defaults.get(llm_provider, "gpt-5")
+    return os.getenv(env_var, default_model) if env_var else default_model
+
+
 def validate_runtime_config() -> None:
     if not is_production():
         return
 
     llm_provider = os.getenv("LLM_PROVIDER", "mock").strip().lower()
-    if llm_provider not in {"openai", "deepseek"}:
+    if llm_provider == "mock":
         raise RuntimeConfigurationError(
-            "Production requires LLM_PROVIDER=openai or LLM_PROVIDER=deepseek."
+            "Production requires a real LLM_PROVIDER, not 'mock'."
+        )
+    if llm_provider not in _PROVIDER_KEY_MAP and llm_provider != "ollama":
+        raise RuntimeConfigurationError(
+            f"Unknown LLM_PROVIDER '{llm_provider}'. "
+            f"Supported: {', '.join(sorted([*_PROVIDER_KEY_MAP.keys(), 'ollama']))}."
         )
 
-    key_name = "OPENAI_API_KEY" if llm_provider == "openai" else "DEEPSEEK_API_KEY"
-    if not os.getenv(key_name, "").strip():
-        raise RuntimeConfigurationError(f"Production LLM provider requires {key_name}.")
+    if llm_provider != "ollama":
+        key_name = _PROVIDER_KEY_MAP[llm_provider]
+        if not os.getenv(key_name, "").strip():
+            raise RuntimeConfigurationError(f"Production LLM provider requires {key_name}.")
 
     search_provider = os.getenv("SEARCH_PROVIDER", "mock").strip().lower()
     if search_provider == "multi":
@@ -108,8 +153,12 @@ def get_runtime_config() -> dict:
     """
     llm_provider = os.getenv("LLM_PROVIDER", "mock").lower()
     openai_api_key = os.getenv("OPENAI_API_KEY", "")
-    openai_model = os.getenv("OPENAI_MODEL", "gpt-5")
     deepseek_api_key = os.getenv("DEEPSEEK_API_KEY", "")
+    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    gemini_api_key = os.getenv("GEMINI_API_KEY", "")
+    dashscope_api_key = os.getenv("DASHSCOPE_API_KEY", "")
+    zhipuai_api_key = os.getenv("ZHIPUAI_API_KEY", "")
+    aihubmix_api_key = os.getenv("AIHUBMIX_API_KEY", "")
     search_provider = os.getenv("SEARCH_PROVIDER", "mock").lower()
     search_providers = os.getenv("SEARCH_PROVIDERS", "")
     tavily_api_key = os.getenv("TAVILY_API_KEY", "")
@@ -120,10 +169,16 @@ def get_runtime_config() -> dict:
     searxng_base_url = os.getenv("SEARXNG_BASE_URL", "")
     x_mcp_search_url = os.getenv("X_MCP_SEARCH_URL", "")
     rag_embedding_provider = os.getenv("RAG_EMBEDDING_PROVIDER", "hash").lower()
-    llm_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat") if llm_provider == "deepseek" else openai_model
-    llm_enabled = (
+    llm_model = _get_provider_model(llm_provider)
+    # Ollama works without an API key; all other providers require one.
+    llm_enabled = (llm_provider == "ollama") or (
         (llm_provider == "openai" and bool(openai_api_key))
         or (llm_provider == "deepseek" and bool(deepseek_api_key))
+        or (llm_provider == "anthropic" and bool(anthropic_api_key))
+        or (llm_provider == "gemini" and bool(gemini_api_key))
+        or (llm_provider == "dashscope" and bool(dashscope_api_key))
+        or (llm_provider == "zhipuai" and bool(zhipuai_api_key))
+        or (llm_provider == "aihubmix" and bool(aihubmix_api_key))
     )
 
     return {

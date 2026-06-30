@@ -16,6 +16,15 @@ DeepAlpha 是一个面向 A 股、港股和美股的多智能体投研系统。�
 
 默认配置采用 `APP_ENV=development`、`LLM_PROVIDER=mock`、`SEARCH_PROVIDER=mock`，无需真实 API Key 即可启动项目并完成流程演示。生产模式必须配置真实 LLM 与搜索 provider；系统不会在生产环境用 mock 数据替代失败的真实来源。
 
+## 运行模式速查
+
+| 模式 | 推荐配置 | 适合场景 | 关键约束 |
+| --- | --- | --- | --- |
+| 本地演示 | `APP_ENV=development`、`LLM_PROVIDER=mock`、`SEARCH_PROVIDER=mock` | clone 后快速启动、前端功能演示、代码评审 | 报告内容为 mock LLM 输出，不能代表真实投研质量 |
+| 联网开发 | `APP_ENV=development`、真实搜索 provider、可选真实 LLM | 调试搜索、行情、RAG 和报告链路 | 外部数据源可能限流，失败会反映在数据质量字段中 |
+| 受控生产 | `APP_ENV=production`、`LLM_PROVIDER=deepseek/openai/anthropic/gemini/ollama/dashscope/zhipuai/aihubmix`、`SEARCH_PROVIDER=multi` | 小范围演示、内部试用、部署验证 | 必须配置真实 LLM 和至少一个真实搜索源；建议启用访问码和限流 |
+| 公开部署 | 受控生产配置 + 独立域名 + GitHub Secrets/Variables + 持久化存储 | 公开 GitHub 项目展示和线上 Demo | 不要提交真实 Key；多实例部署需要外部任务存储和更完整鉴权 |
+
 ## 功能特性
 
 | 能力 | 说明 |
@@ -23,7 +32,7 @@ DeepAlpha 是一个面向 A 股、港股和美股的多智能体投研系统。�
 | 多市场证券识别 | 支持 A 股、港股和美股的公司名、代码、别名与交易所信息解析。 |
 | 行情与市场复盘 | 按市场路由 AkShare、Yahoo、Nasdaq、Finnhub、Efinance、Baostock 等 provider，并记录 fallback 与失败原因。 |
 | 多 Agent 投研流程 | Planner、行业、基本面、财务、估值、技术、新闻、情绪、多空、交易观点、风控、来源质量和委员会节点协作生成报告。 |
-| 财务数据接入 | 美股接入 SEC EDGAR companyfacts；A 股和港股通过 AkShare 获取可稳定映射的财务摘要与公告链接。 |
+| 财务数据接入 | 美股接入 SEC EDGAR companyfacts；A 股和港股通过 AkShare 获取财务摘要（含资产负债表和利润表补全指标）、多类型公告（含分类）、分析师盈利预测共识（东方财富/ETNET）、港股分红记录和南北向资金流向。 |
 | RAG 与搜索 | 支持 Brave Search、BlockBeats、Tavily、SerpAPI、Bocha、SearXNG、可选 X MCP adapter 和 Chroma；开发模式可使用 mock provider 跑通流程。 |
 | 数据质量治理 | 通过 `AnalysisContextPack` 标记 `available`、`fallback`、`partial`、`missing`、`not_supported`、`fetch_failed` 等状态。 |
 | 报告可靠性 | 提供引用覆盖检查、来源质量评估、Agent trace、Markdown 编辑和风险提示。 |
@@ -61,7 +70,7 @@ flowchart LR
 | --- | --- |
 | 后端 | Python、FastAPI、Pydantic |
 | Agent 编排 | LangGraph |
-| LLM | DeepSeek、OpenAI、开发测试 mock |
+| LLM | DeepSeek、OpenAI、Claude、Gemini、Ollama、通义千问、智谱 GLM、AIHubMix、开发测试 mock |
 | 检索 | Brave Search、BlockBeats、Tavily、SerpAPI、Bocha、SearXNG、可选 X MCP adapter、Chroma |
 | 行情 / 市场复盘 | AkShare、Yahoo Finance、Nasdaq、Finnhub、Efinance、Baostock |
 | 财务 | SEC EDGAR companyfacts、AkShare |
@@ -110,8 +119,9 @@ ETF 代理的涨跌幅可用于轻量复盘，但 ETF 收盘价不是指数点�
 | 数据类型 | 来源 | 当前边界 |
 | --- | --- | --- |
 | 美股财务 | SEC EDGAR companyfacts | 覆盖美国上市公司和部分提交 20-F 的外国发行人；SEC 元数据失败时保留结构化事实并标记 `partial` |
-| A 股财务与公告 | AkShare 东方财富/新浪可用接口 | 提取最近财务摘要中的收入、净利润、毛利率、净利率、ROE、资产负债率、经营现金流等可映射字段，并附最近财报公告链接；字段缺失标记 `partial`，接口无记录标记 `missing`，调用失败标记 `fetch_failed` |
-| 港股财务与公告 | AkShare 东方财富港股财务与公告接口 | 优先返回公告/财报链接和可稳定映射的基础摘要；结构化字段不稳定时只返回真实可得字段，并在 `missing_fields` 中标明缺口，不用估算或 mock 补数 |
+| A 股财务与公告 | AkShare 东方财富/新浪可用接口 | 提取收入、净利润、毛利率、净利率、ROE、资产负债率、经营现金流、营业利润、EPS、货币资金、短期/长期借款、股东权益等可映射字段，含同比变化；多类型公告（财务报告、重大事项、资产重组、持股变动、融资公告）经关键词分类为 11 个标准化类别；接入东方财富分析师盈利预测共识（EPS 预期、买卖评级、研报数）。字段缺失标记 `partial`，接口无记录标记 `missing`，调用失败标记 `fetch_failed` |
+| 港股财务与公告 | AkShare 东方财富港股财务与公告接口 | 优先返回公告/财报链接和财务指标（收入、净利润、毛利率等），补充资产负债表和利润表数据（经行转列 pivot）；接入 ETNET 券商盈利预测（含目标价和评级）和分红记录（派息方案、除净日）。结构化字段不稳定时只返回真实可得字段，并在 `missing_fields` 中标明缺口 |
+| 资金流向 | AkShare 沪深港通资金流向 | 返回北向/南向成交净买额（市场级别），不作为个股信号 |
 | 通用网页搜索 | Brave Search、Tavily | 需要 API Key |
 | 搜索引擎聚合 | SerpAPI | 可补充 Google/Bing 等搜索结果，需要 API Key |
 | 中文搜索 | Bocha | 适合中文新闻、A 股和港股语境，需要 API Key |
@@ -250,28 +260,70 @@ PLTR
 
 ### LLM
 
-推荐生产环境使用 DeepSeek：
+项目支持 8 个 LLM provider，通过 `LLM_PROVIDER` 环境变量选择。5 个走 OpenAI 兼容协议（与 DeepSeek 相同模式），Claude 走 Anthropic Messages API，Ollama 免 Key 本地运行。
+
+**Provider 速查**
+
+| Provider | `LLM_PROVIDER` | 需要 Key | 默认模型 | 免费额度 | 说明 |
+| --- | --- | --- | --- | --- | --- |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-chat` | ❌ 按量付费 | 推荐生产首选，性价比高 |
+| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-5` | ❌ 按量付费 | 通用能力强 |
+| Anthropic Claude | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` | ❌ 按量付费 | 分析推理能力突出 |
+| Google Gemini | `gemini` | `GEMINI_API_KEY` | `gemini-2.5-flash` | ✅ 15 RPM | 超大 context，免费额度足 |
+| Ollama | `ollama` | 无 | `llama3` | ✅ 完全免费 | 本地运行，数据不出机器 |
+| 通义千问 (DashScope) | `dashscope` | `DASHSCOPE_API_KEY` | `qwen-plus` | ✅ 百万 token | 阿里云，中文能力强 |
+| 智谱 GLM (ZhipuAI) | `zhipuai` | `ZHIPUAI_API_KEY` | `glm-4-flash` | ✅ 免费额度 | 国产模型，注册即用 |
+| AIHubMix | `aihubmix` | `AIHUBMIX_API_KEY` | `deepseek-chat` | ❌ 按量付费 | 聚合网关，一 Key 切全系 |
+
+**推荐生产配置（DeepSeek）**
 
 ```env
 APP_ENV=production
 LLM_PROVIDER=deepseek
 DEEPSEEK_API_KEY=your_deepseek_api_key
+DEEPSEEK_MODEL=deepseek-chat
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
-也可以使用 OpenAI：
+**其他 provider 示例**
 
 ```env
-LLM_PROVIDER=openai
-OPENAI_API_KEY=your_openai_api_key
-OPENAI_MODEL=gpt-5
+# Anthropic Claude
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=your_anthropic_api_key
+ANTHROPIC_MODEL=claude-sonnet-4-6
+
+# Google Gemini（免费 15 RPM）
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.5-flash
+
+# Ollama 本地模型（先 ollama pull llama3）
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434/v1
+OLLAMA_MODEL=llama3
+
+# 阿里云通义千问
+LLM_PROVIDER=dashscope
+DASHSCOPE_API_KEY=your_dashscope_api_key
+DASHSCOPE_MODEL=qwen-plus
+
+# 智谱 GLM
+LLM_PROVIDER=zhipuai
+ZHIPUAI_API_KEY=your_zhipuai_api_key
+ZHIPUAI_MODEL=glm-4-flash
+
+# AIHubMix 聚合网关
+LLM_PROVIDER=aihubmix
+AIHUBMIX_API_KEY=your_aihubmix_api_key
+AIHUBMIX_MODEL=deepseek-chat
 ```
 
-生产环境规则：
+**生产环境规则**
 
-- `LLM_PROVIDER` 必须是 `deepseek` 或 `openai`。
-- 对应 API Key 必须存在。
-- LLM 调用失败时报告与报告追问接口返回 HTTP 503。
+- `LLM_PROVIDER` 必须是上述 8 个 provider 之一或 `ollama`，不允许 `mock`。
+- 对应 API Key 必须存在（Ollama 除外）。
+- LLM 调用失败时报告与追问接口返回 HTTP 503。
 - mock LLM 只允许在开发和测试环境使用。
 
 ### 搜索
@@ -374,13 +426,17 @@ SEC_USER_AGENT=DeepAlpha production contact@example.com
 | `GET` | `/health/providers` | 脱敏数据源健康检查 |
 | `GET` | `/config` | 查看运行配置，不返回密钥 |
 | `GET` | `/symbol/lookup` | 根据公司名或代码查询候选证券 |
+| `POST` | `/symbol/resolve-batch` | 批量解析 Watchlist 导入文本或 CSV 中的证券 |
 | `GET` | `/market/chart` | 获取行情和 provider 降级信息 |
+| `GET` | `/market/review` | 获取 A 股、港股、美股市场复盘 |
 | `GET` | `/financials/latest` | 获取 SEC 财务摘要 |
 | `POST` | `/analyze` | 返回完整 Agent 输出、上下文、引用和 trace |
 | `POST` | `/report` | 返回前端展示用报告 |
 | `POST` | `/report/tasks` | 创建后台报告任务 |
 | `GET` | `/report/tasks/{task_id}` | 查询后台任务状态 |
 | `POST` | `/chat/report` | 围绕已生成报告进行单次结构化追问 |
+| `GET` | `/chat/report/{task_id}/history` | 查询报告追问历史 |
+| `DELETE` | `/chat/report/{task_id}/history` | 清空报告追问历史 |
 | `GET` | `/memory/history` | 查询研究历史 |
 | `GET` / `POST` | `/memory/watchlist` | 查询或新增关注标的 |
 
@@ -505,7 +561,7 @@ curl -X DELETE http://127.0.0.1:8000/chat/report/{task_id}/history \
 ```text
 app/
   agents/          # 分析角色、委员会、风控与报告编辑
-  llm/             # OpenAI-compatible LLM 客户端
+  llm/             # 多 provider LLM 客户端（OpenAI 兼容 + Anthropic SDK）
   memory/          # SQLite 研究历史与 Watchlist
   rag/             # 文档加载、向量存储与检索
   services/        # 上下文、缓存、财务、日志和限流
@@ -603,7 +659,7 @@ git ls-files -ci --exclude-standard
 
 ## 已知限制
 
-- A 股和港股的交易所公告、分业务财务和管理层指引尚未接入。
+- A 股和港股的分业务/分部财务数据尚未实现结构化提取，依赖公告标题关键词匹配做 best-effort 提示。管理层指引已通过分析师盈利预测共识接入，但业绩会原文转录和正式管理层前瞻性陈述仍需补充。
 - 免费或低成本行情、搜索 provider 可能限流，字段完整度也可能变化。
 - 当前异步任务状态保存在进程内，多 worker 或多实例部署需要外部任务存储。
 - 访问码和基础限流适合受控演示，不是完整鉴权体系。

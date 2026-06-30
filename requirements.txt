@@ -3,6 +3,7 @@ chromadb==1.5.9
 efinance==0.5.8
 fastapi==0.136.3
 langgraph==1.2.2
+anthropic>=0.96.0,<1.0.0
 openai==2.38.0
 pytest==8.3.4
 python-dotenv==1.1.0
