@@ -16,16 +16,20 @@ DeepAlpha 是一个面向 A 股、港股和美股的多智能体投研系统。�
 
 默认配置采用 `APP_ENV=development`、`LLM_PROVIDER=mock`、`SEARCH_PROVIDER=mock`，无需真实 API Key 即可启动项目并完成流程演示。生产模式必须配置真实 LLM 与搜索 provider；系统不会在生产环境用 mock 数据替代失败的真实来源。
 
-## 核心能力
+## 功能特性
 
-- 多市场支持：A 股、港股、美股的证券识别、行情路由、市场复盘和图表展示。
-- 多 Agent 工作流：规划、行业、基本面、财务、估值、技术、新闻、情绪、多空辩论、交易观点、风险审查、来源质量和委员会总结。
-- 多源检索：支持 Brave Search、BlockBeats、Tavily；生产环境搜索失败时标记数据缺失，不用 mock 伪造来源。
-- 财务数据：美股接入 SEC EDGAR companyfacts；A 股和港股接入 AkShare 可用财务摘要与公告接口，按字段稳定性标记数据质量。
-- 数据质量层：用 `AnalysisContextPack` 标记 `available`、`fallback`、`partial`、`missing`、`not_supported`、`fetch_failed` 等状态。
-- 报告可靠性：引用覆盖检查、来源质量评估、Agent trace、Markdown 报告编辑和风险提示。
-- 生产约束：`APP_ENV=production` 下禁止 mock LLM 和 mock 搜索；LLM 失败返回明确错误，搜索失败记录为缺失数据。
-- 前端工作台：React/Vite 三栏界面，支持公司搜索、候选证券、K 线图、报告生成、历史记录、Watchlist 和 Watchlist 智能导入。
+| 能力 | 说明 |
+| --- | --- |
+| 多市场证券识别 | 支持 A 股、港股和美股的公司名、代码、别名与交易所信息解析。 |
+| 行情与市场复盘 | 按市场路由 AkShare、Yahoo、Nasdaq、Finnhub、Efinance、Baostock 等 provider，并记录 fallback 与失败原因。 |
+| 多 Agent 投研流程 | Planner、行业、基本面、财务、估值、技术、新闻、情绪、多空、交易观点、风控、来源质量和委员会节点协作生成报告。 |
+| 财务数据接入 | 美股接入 SEC EDGAR companyfacts；A 股和港股通过 AkShare 获取可稳定映射的财务摘要与公告链接。 |
+| RAG 与搜索 | 支持 Brave Search、BlockBeats、Tavily 和 Chroma；开发模式可使用 mock provider 跑通流程。 |
+| 数据质量治理 | 通过 `AnalysisContextPack` 标记 `available`、`fallback`、`partial`、`missing`、`not_supported`、`fetch_failed` 等状态。 |
+| 报告可靠性 | 提供引用覆盖检查、来源质量评估、Agent trace、Markdown 编辑和风险提示。 |
+| 报告追问 | 支持基于已生成报告、结构化画像和可选联网检索的结构化问答。 |
+| Web 工作台 | React/Vite 三栏界面，覆盖公司搜索、候选证券、K 线图、报告生成、历史记录和 Watchlist。 |
+| 生产约束 | `APP_ENV=production` 下禁止 mock LLM 和 mock 搜索；LLM 失败返回明确错误，搜索失败记录为缺失数据。 |
 
 ## 适用场景
 
@@ -185,6 +189,38 @@ VITE_API_BASE=https://api.deepalpha.best
 4. 创建报告任务，等待多 Agent 工作流生成 Markdown 报告。
 5. 查看报告正文、历史记录、报告追问和来源质量提示。
 6. 使用 Watchlist 导入或保存关注标的。
+
+## 报告输出示例
+
+报告以 Markdown 形式返回，前端会渲染标题、列表、链接和风险提示。典型结构如下：
+
+```markdown
+# Tesla 投研报告
+
+## 核心结论
+- 综合观点：中性偏积极，需结合估值和交付数据继续验证。
+- 关键变量：交付量、汽车毛利率、FSD 进展、能源业务增速。
+
+## 数据质量
+- 行情：available，provider=yahoo。
+- 财务：available，来源为 SEC companyfacts。
+- 新闻与行业检索：partial，部分来源可能受搜索 API 覆盖影响。
+
+## 基本面与财务
+- 收入、利润率、现金流和资产负债结构摘要。
+- 与历史同期或最近报告期的变化。
+
+## 风险与跟踪事项
+- 价格竞争、监管、需求波动、供应链和估值回撤风险。
+- 后续关注交付数据、财报、管理层指引和主要监管披露。
+
+## 来源
+- SEC filing / companyfacts
+- 行情 provider
+- 新闻与行业检索结果
+```
+
+实际内容取决于运行模式、provider 可用性、搜索结果质量和 LLM 配置。所有结论都应由使用者复核。
 
 ### Watchlist 智能导入
 
@@ -449,6 +485,20 @@ npm run build
 ```
 
 GitHub Actions 会在 push 和 pull request 时运行后端测试与前端构建。
+
+## 常用命令
+
+| 场景 | 命令 |
+| --- | --- |
+| 启动后端 | `uvicorn app.main:app --reload` |
+| 启动前端 | `cd frontend && npm run dev` |
+| 后端健康检查 | `curl http://127.0.0.1:8000/health` |
+| 证券查询 | `curl "http://127.0.0.1:8000/symbol/lookup?query=Tesla"` |
+| 后端测试 | `pytest -q` |
+| Python 编译检查 | `python -m compileall -q app tests` |
+| 前端测试 | `cd frontend && npm run test:stock` |
+| 前端生产构建 | `cd frontend && npm run build` |
+| 检查忽略文件跟踪状态 | `git ls-files -ci --exclude-standard` |
 
 ## 部署
 
