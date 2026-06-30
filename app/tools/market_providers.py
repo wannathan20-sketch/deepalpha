@@ -276,11 +276,40 @@ class AkShareProvider(_ImportProvider):
     name = "akshare"
     module_name = "akshare"
 
+    CN_INDEX_SYMBOLS = {
+        ("SH", "000001"): "sh000001",
+        ("SZ", "399001"): "sz399001",
+        ("SZ", "399006"): "sz399006",
+        ("SH", "000688"): "sh000688",
+    }
+
     def supports(self, market: str) -> bool:
         return market in {"cn", "hk"}
 
     def fetch_chart(self, request: MarketChartRequest) -> dict:
         ak = self._module()
+        index_symbol = self.CN_INDEX_SYMBOLS.get((request.symbol.exchange, request.symbol.local_symbol))
+        if request.symbol.market == "cn" and index_symbol:
+            frame = ak.stock_zh_index_daily(symbol=index_symbol)
+            rows = [
+                {
+                    "time": row.get("date") or row.get("日期"),
+                    "open": row.get("open") or row.get("开盘"),
+                    "high": row.get("high") or row.get("最高"),
+                    "low": row.get("low") or row.get("最低"),
+                    "close": row.get("close") or row.get("收盘"),
+                    "volume": row.get("volume") or row.get("成交量"),
+                }
+                for row in _records(frame)
+            ]
+            return {
+                "symbol": request.symbol.local_symbol,
+                "exchange": request.symbol.exchange,
+                "instrument_type": "index",
+                "source_url": f"https://quote.eastmoney.com/zs{request.symbol.local_symbol}.html",
+                "points": normalize_points(rows),
+            }
+
         kwargs = {
             "symbol": request.symbol.local_symbol,
             "period": "daily",

@@ -98,9 +98,9 @@ class FakeFrame:
         return self.records
 
 
-def provider_request(raw_symbol: str) -> MarketChartRequest:
+def provider_request(raw_symbol: str, exchange: str | None = None) -> MarketChartRequest:
     return MarketChartRequest(
-        symbol=normalize_market_symbol(raw_symbol),
+        symbol=normalize_market_symbol(raw_symbol, exchange),
         range_="6mo",
         interval="1d",
         start_date=date(2026, 1, 1),
@@ -133,6 +133,33 @@ def test_akshare_adapter_maps_chinese_columns(monkeypatch) -> None:
 
     assert result["points"][0]["close"] == 11.0
     assert result["exchange"] == "SH"
+
+
+def test_akshare_adapter_uses_index_daily_for_cn_indices(monkeypatch) -> None:
+    frame = FakeFrame(
+        [
+            {"日期": "2026-01-02", "开盘": 1000, "最高": 1010, "最低": 990, "收盘": 1005, "成交量": 100},
+            {"日期": "2026-01-03", "开盘": 1005, "最高": 1020, "最低": 1000, "收盘": 1018, "成交量": 120},
+        ]
+    )
+    captured = {}
+
+    def fake_index_daily(symbol: str):
+        captured["symbol"] = symbol
+        return frame
+
+    def fail_stock_history(**kwargs):
+        raise AssertionError("CN indices should use stock_zh_index_daily")
+
+    module = SimpleNamespace(stock_zh_index_daily=fake_index_daily, stock_zh_a_hist=fail_stock_history)
+    monkeypatch.setattr(AkShareProvider, "_module", lambda self: module)
+
+    result = AkShareProvider().fetch_chart(provider_request("000688.SH", exchange="SSE"))
+
+    assert captured["symbol"] == "sh000688"
+    assert result["instrument_type"] == "index"
+    assert result["source_url"] == "https://quote.eastmoney.com/zs000688.html"
+    assert [point["close"] for point in result["points"]] == [1005.0, 1018.0]
 
 
 def test_akshare_hk_index_adapter_maps_hang_seng_index(monkeypatch) -> None:
