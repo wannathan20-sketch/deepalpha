@@ -209,11 +209,18 @@ class NasdaqProvider:
     def fetch_chart(self, request: MarketChartRequest) -> dict:
         original_symbol = request.symbol.yahoo_symbol
         mapping = NASDAQ_REVIEW_SYMBOLS.get(original_symbol)
-        if mapping is None:
-            return {"symbol": request.symbol.local_symbol, "points": []}
 
-        symbol = mapping["symbol"]
-        asset_class = mapping["asset_class"]
+        if mapping is not None:
+            symbol = mapping["symbol"]
+            asset_class = mapping["asset_class"]
+            instrument_type = mapping["instrument_type"]
+        else:
+            # Individual stock — Nasdaq API supports stocks via assetclass=stocks.
+            # 个股走 Nasdaq stocks 端点，不再只支持三大指数。
+            symbol = original_symbol
+            asset_class = "stocks"
+            instrument_type = "stock"
+
         response = requests.get(
             f"https://api.nasdaq.com/api/quote/{quote(symbol)}/chart",
             params={"assetclass": asset_class},
@@ -248,14 +255,14 @@ class NasdaqProvider:
         result = {
             "symbol": symbol,
             "exchange": "US",
-            "instrument_type": mapping["instrument_type"],
+            "instrument_type": instrument_type,
             "source_url": (
                 f"https://www.nasdaq.com/market-activity/"
                 f"{asset_class}/{symbol.lower()}"
             ),
             "points": normalize_points(rows),
         }
-        if mapping["instrument_type"] == "etf_proxy":
+        if instrument_type == "etf_proxy":
             result["proxy_symbol"] = symbol
             result["proxy_for"] = original_symbol
         return result

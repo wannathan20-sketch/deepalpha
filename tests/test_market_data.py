@@ -333,19 +333,73 @@ def test_nasdaq_adapter_marks_etf_proxies(
     assert result["proxy_for"] == raw_symbol
 
 
-def test_nasdaq_adapter_returns_empty_for_unmapped_symbol(monkeypatch) -> None:
-    called = False
+def test_nasdaq_adapter_fetches_individual_stocks(monkeypatch) -> None:
+    """NasdaqProvider should now request individual stocks via assetclass=stocks,
+    not return empty for unmapped symbols."""
+    import time as _time
 
-    def fake_get(*args, **kwargs):
-        nonlocal called
-        called = True
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "data": {
+                    "chart": [
+                        {"x": int(_time.time() * 1000) - 86_400_000, "y": 280.0},
+                        {"x": int(_time.time() * 1000), "y": 281.74},
+                    ],
+                    "lastSalePrice": "$281.74",
+                    "previousClose": "$283.78",
+                    "volume": "66,427,169",
+                }
+            }
+
+    kwargs_captured = {}
+
+    def fake_get(url, **kwargs):
+        kwargs_captured["url"] = url
+        kwargs_captured["params"] = kwargs.get("params", {})
+        return Response()
 
     monkeypatch.setattr("app.tools.market_providers.requests.get", fake_get)
 
     result = NasdaqProvider().fetch_chart(provider_request("AAPL"))
 
-    assert result["points"] == []
-    assert called is False
+    assert result["points"] != []
+    assert result["symbol"] == "AAPL"
+    assert result["instrument_type"] == "stock"
+    assert kwargs_captured["params"]["assetclass"] == "stocks"
+
+
+def test_nasdaq_adapter_still_handles_review_indices(monkeypatch) -> None:
+    """^GSPC should still be mapped to SPY ETF proxy."""
+    import time as _time
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "data": {
+                    "chart": [
+                        {"x": int(_time.time() * 1000) - 86_400_000, "y": 600.0},
+                        {"x": int(_time.time() * 1000), "y": 605.0},
+                    ],
+                    "lastSalePrice": "$605.00",
+                    "previousClose": "$602.00",
+                }
+            }
+
+    monkeypatch.setattr("app.tools.market_providers.requests.get", lambda *a, **kw: Response())
+
+    result = NasdaqProvider().fetch_chart(provider_request("^GSPC"))
+
+    assert result["points"] != []
+    assert result["symbol"] == "SPY"
+    assert result["instrument_type"] == "etf_proxy"
+    assert result["proxy_for"] == "^GSPC"
 
 
 def test_finnhub_adapter_maps_candles(monkeypatch) -> None:
