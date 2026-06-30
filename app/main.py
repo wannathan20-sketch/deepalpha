@@ -22,6 +22,7 @@ from app.graph import run_deepalpha_graph
 from app.memory.store import (
     add_to_watchlist,
     delete_history_by_id,
+    get_db_info,
     get_history_by_id,
     get_research_history,
     get_watchlist,
@@ -707,6 +708,14 @@ def report_chat_history(task_id: str, http_request: Request) -> dict:
 def report_chat_history_delete(task_id: str, http_request: Request) -> dict:
     user_id = _require_report_access(http_request)
     return {"task_id": task_id, "deleted": delete_history(user_id, task_id)}
+
+
+@app.get("/memory/db")
+def memory_db_info() -> dict:
+    """Return database stats for production inspection.
+    返回数据库统计信息，用于线上查看表结构、行数、文件大小。
+    """
+    return get_db_info()
 
 
 @app.get("/memory/history")

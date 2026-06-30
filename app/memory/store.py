@@ -364,3 +364,32 @@ def _update_watchlist_last_analyzed_at(
         """,
         (analyzed_at, tenant_id, user_id, company_name.lower()),
     )
+
+
+def get_db_info() -> dict:
+    """Return database stats: path, size, table names, row counts, schema.
+    返回数据库统计信息，方便线上查看数据库状态。
+    """
+    path = DATABASE_PATH
+    size_bytes = path.stat().st_size if path.exists() else 0
+    tables = []
+    with _connect() as connection:
+        rows = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        ).fetchall()
+        for (name,) in rows:
+            count = connection.execute(
+                f'SELECT COUNT(*) FROM "{name}"'
+            ).fetchone()[0]
+            cols = connection.execute(f"PRAGMA table_info('{name}')").fetchall()
+            tables.append({
+                "name": name,
+                "row_count": count,
+                "columns": [{"name": c[1], "type": c[2]} for c in cols],
+            })
+    return {
+        "db_path": str(path),
+        "size_bytes": size_bytes,
+        "size_kb": round(size_bytes / 1024, 1),
+        "tables": tables,
+    }
