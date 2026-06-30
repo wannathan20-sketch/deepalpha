@@ -579,7 +579,9 @@ def test_all_provider_failures_return_stable_error(monkeypatch) -> None:
     assert [attempt["status"] for attempt in result["provider_attempts"]] == ["failed", "unavailable"]
 
 
-def test_us_auto_router_falls_back_from_yahoo_to_nasdaq(monkeypatch) -> None:
+def test_us_auto_router_hits_nasdaq_first(monkeypatch) -> None:
+    """Nasdaq is now the default top-priority US provider (no API key, no
+    cloud-IP rate limiting).  It should succeed on the first attempt."""
     yahoo = FakeProvider(
         "yahoo",
         markets={"us"},
@@ -590,8 +592,8 @@ def test_us_auto_router_falls_back_from_yahoo_to_nasdaq(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.tools.market_data._provider_registry",
         lambda: {
-            "yahoo": yahoo,
             "nasdaq": nasdaq,
+            "yahoo": yahoo,
             "finnhub": finnhub,
         },
     )
@@ -600,11 +602,8 @@ def test_us_auto_router_falls_back_from_yahoo_to_nasdaq(monkeypatch) -> None:
     result = get_market_chart("^IXIC", "auto")
 
     assert result["provider"] == "nasdaq"
-    assert result["fallback_from"] == "yahoo"
-    assert [item["provider"] for item in result["provider_attempts"]] == [
-        "yahoo",
-        "nasdaq",
-    ]
+    assert "fallback_from" not in result
+    assert [item["provider"] for item in result["provider_attempts"]] == ["nasdaq"]
 
 
 def test_hk_auto_router_prefers_akshare_index_before_yahoo(monkeypatch) -> None:

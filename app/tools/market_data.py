@@ -21,7 +21,7 @@ from app.tools.market_symbols import normalize_market_symbol
 DEFAULT_PROVIDER_ORDERS = {
     "cn": ["akshare", "efinance", "baostock", "yfinance", "yahoo"],
     "hk": ["yfinance", "akshare_hk_index", "yahoo", "akshare"],
-    "us": ["yfinance", "yahoo", "nasdaq", "finnhub"],
+    "us": ["nasdaq", "yfinance", "yahoo", "finnhub"],
 }
 RANGE_DAYS = {
     "1mo": 31,
