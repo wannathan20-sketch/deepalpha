@@ -24,7 +24,7 @@ DeepAlpha 是一个面向 A 股、港股和美股的多智能体投研系统。�
 | 行情与市场复盘 | 按市场路由 AkShare、Yahoo、Nasdaq、Finnhub、Efinance、Baostock 等 provider，并记录 fallback 与失败原因。 |
 | 多 Agent 投研流程 | Planner、行业、基本面、财务、估值、技术、新闻、情绪、多空、交易观点、风控、来源质量和委员会节点协作生成报告。 |
 | 财务数据接入 | 美股接入 SEC EDGAR companyfacts；A 股和港股通过 AkShare 获取可稳定映射的财务摘要与公告链接。 |
-| RAG 与搜索 | 支持 Brave Search、BlockBeats、Tavily 和 Chroma；开发模式可使用 mock provider 跑通流程。 |
+| RAG 与搜索 | 支持 Brave Search、BlockBeats、Tavily、SerpAPI、Bocha、SearXNG、可选 X MCP adapter 和 Chroma；开发模式可使用 mock provider 跑通流程。 |
 | 数据质量治理 | 通过 `AnalysisContextPack` 标记 `available`、`fallback`、`partial`、`missing`、`not_supported`、`fetch_failed` 等状态。 |
 | 报告可靠性 | 提供引用覆盖检查、来源质量评估、Agent trace、Markdown 编辑和风险提示。 |
 | 报告追问 | 支持基于已生成报告、结构化画像和可选联网检索的结构化问答。 |
@@ -62,7 +62,7 @@ flowchart LR
 | 后端 | Python、FastAPI、Pydantic |
 | Agent 编排 | LangGraph |
 | LLM | DeepSeek、OpenAI、开发测试 mock |
-| 检索 | Brave Search、BlockBeats、Tavily、Chroma |
+| 检索 | Brave Search、BlockBeats、Tavily、SerpAPI、Bocha、SearXNG、可选 X MCP adapter、Chroma |
 | 行情 / 市场复盘 | AkShare、Yahoo Finance、Nasdaq、Finnhub、Efinance、Baostock |
 | 财务 | SEC EDGAR companyfacts、AkShare |
 | 存储 | SQLite、Chroma |
@@ -113,7 +113,11 @@ ETF 代理的涨跌幅可用于轻量复盘，但 ETF 收盘价不是指数点�
 | A 股财务与公告 | AkShare 东方财富/新浪可用接口 | 提取最近财务摘要中的收入、净利润、毛利率、净利率、ROE、资产负债率、经营现金流等可映射字段，并附最近财报公告链接；字段缺失标记 `partial`，接口无记录标记 `missing`，调用失败标记 `fetch_failed` |
 | 港股财务与公告 | AkShare 东方财富港股财务与公告接口 | 优先返回公告/财报链接和可稳定映射的基础摘要；结构化字段不稳定时只返回真实可得字段，并在 `missing_fields` 中标明缺口，不用估算或 mock 补数 |
 | 通用网页搜索 | Brave Search、Tavily | 需要 API Key |
+| 搜索引擎聚合 | SerpAPI | 可补充 Google/Bing 等搜索结果，需要 API Key |
+| 中文搜索 | Bocha | 适合中文新闻、A 股和港股语境，需要 API Key |
+| 自建搜索 | SearXNG | 适合私有部署或低成本兜底，需要配置实例地址 |
 | 垂直资讯 | BlockBeats | 适合 Web3、加密市场相关信息，需要 API Key |
+| 社交信号 | X MCP adapter | 可选社交数据源，用于最新讨论、市场情绪和事件线索；需要自行提供 HTTP adapter |
 | 本地开发 | mock provider | 仅限开发和自动化测试 |
 
 ## 快速开始
@@ -274,14 +278,58 @@ OPENAI_MODEL=gpt-5
 
 ```env
 SEARCH_PROVIDER=multi
-SEARCH_PROVIDERS=brave,blockbeats,tavily
+SEARCH_PROVIDERS=brave,blockbeats,tavily,serpapi,bocha,searxng
 SEARCH_MAX_WORKERS=4
 BRAVE_SEARCH_API_KEY=your_brave_search_api_key
 BLOCKBEATS_API_KEY=your_blockbeats_api_key
 TAVILY_API_KEY=your_tavily_api_key
+SERPAPI_API_KEY=your_serpapi_api_key
+BOCHA_API_KEY=your_bocha_api_key
+SEARXNG_BASE_URL=https://your-searxng.example.com
 ```
 
-生产环境至少需要配置一个可用搜索 Key。全部真实搜索来源失败时，RAG 上下文会标记为 `fetch_failed`，报告不会用 mock 来源补位。
+生产环境至少需要配置一个可用搜索来源，例如 API Key 或 SearXNG 实例地址。全部真实搜索来源失败时，RAG 上下文会标记为 `fetch_failed`，报告不会用 mock 来源补位。
+
+搜索 provider 说明：
+
+- `serpapi` 使用 SerpAPI REST 接口，适合补充实时搜索引擎结果；可通过 `SERPAPI_ENGINE`、`SERPAPI_HL`、`SERPAPI_GL` 调整搜索引擎和地区语言。
+- `bocha` 使用 Bocha Web Search API，适合中文新闻、A 股、港股和中文网页摘要；可通过 `BOCHA_FRESHNESS` 控制时效窗口。
+- `searxng` 连接自建 SearXNG 实例，适合私有部署或低成本兜底；需要配置 `SEARXNG_BASE_URL`。
+
+搜索源选择矩阵：
+
+| Provider | 是否需要 Key | 中文 | 英文 | 社交 | 加密 / Web3 | 推荐配置 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `brave` | 是，`BRAVE_SEARCH_API_KEY` | 中 | 高 | 低 | 中 | 通用网页检索主力，推荐放在 `SEARCH_PROVIDERS` 第一或第二位。 |
+| `tavily` | 是，`TAVILY_API_KEY` | 中 | 高 | 低 | 中 | 适合英文新闻、研究文章和网页摘要，推荐与 `brave` 组合。 |
+| `serpapi` | 是，`SERPAPI_API_KEY` | 中 | 高 | 低 | 中 | 适合补充 Google/Bing 等搜索结果；中文场景建议设置 `SERPAPI_HL=zh-cn`、`SERPAPI_GL=cn`。 |
+| `bocha` | 是，`BOCHA_API_KEY` | 高 | 中 | 低 | 中 | 适合中文新闻、A 股、港股和中文网页摘要；中文投研建议加入生产配置。 |
+| `blockbeats` | 是，`BLOCKBEATS_API_KEY` | 高 | 中 | 低 | 高 | 适合 Web3、加密市场和链上事件资讯；非加密标的可不配置。 |
+| `searxng` | 否；需要 `SEARXNG_BASE_URL` | 中 | 中 | 低 | 中 | 适合自建搜索、私有部署和低成本兜底；建议放在真实商业 API 之后。 |
+| `x` | 取决于 adapter；`X_MCP_SEARCH_URL` 必填，`X_MCP_API_KEY` 可选 | 中 | 高 | 高 | 高 | 适合实时讨论、事件线索和市场情绪；只作为补充信号，不替代公告、财报和新闻源。 |
+| `mock` | 否 | 低 | 低 | 低 | 低 | 仅用于本地开发和自动化测试；生产环境禁用。 |
+
+推荐组合：
+
+| 场景 | 推荐 `SEARCH_PROVIDERS` | 说明 |
+| --- | --- | --- |
+| 最小生产配置 | `brave,tavily` | 覆盖通用英文网页和新闻，配置简单。 |
+| 中文投研 / A 股港股 | `bocha,brave,serpapi` | 中文结果优先，Brave 和 SerpAPI 补充跨语种资料。 |
+| 美股 / 全球公司 | `brave,tavily,serpapi` | 英文网页、新闻和搜索引擎覆盖更稳。 |
+| 加密 / Web3 标的 | `blockbeats,brave,tavily,x` | 垂直资讯配合通用搜索，X 只用于情绪和事件线索。 |
+| 私有部署 / 成本敏感 | `searxng,brave` | SearXNG 做基础检索，关键场景用 Brave 补强。 |
+| 演示 / 本地开发 | `mock` | 无需 Key，可跑通流程，但不能代表真实数据质量。 |
+
+可选 X MCP 社交信号源：
+
+```env
+SEARCH_PROVIDER=multi
+SEARCH_PROVIDERS=brave,tavily,x
+X_MCP_SEARCH_URL=http://127.0.0.1:8787/search
+X_MCP_API_KEY=optional_adapter_token
+```
+
+`x` provider 预期连接到一个由 MCP server 或本地服务封装出来的 HTTP adapter。请求格式为 `{"query": "...", "limit": 5}`，响应可返回 `results`、`tweets` 或 `data` 列表；每条结果建议包含 `text`、`author`、`url`、`created_at`。该数据会被标记为 `source_type=social`，适合补充实时讨论和情绪线索，不应替代财报、公告或监管披露。
 
 ### RAG 与存储
 

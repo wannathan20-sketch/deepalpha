@@ -47,6 +47,19 @@ def test_production_runtime_requires_a_usable_search_provider(monkeypatch) -> No
         validate_runtime_config()
 
 
+def test_production_runtime_accepts_configured_x_search_adapter(monkeypatch) -> None:
+    from app.config import validate_runtime_config
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "llm-key")
+    monkeypatch.setenv("SEARCH_PROVIDER", "multi")
+    monkeypatch.setenv("SEARCH_PROVIDERS", "x")
+    monkeypatch.setenv("X_MCP_SEARCH_URL", "http://127.0.0.1:8787/search")
+
+    validate_runtime_config()
+
+
 def test_fastapi_startup_validates_production_runtime(monkeypatch) -> None:
     from fastapi.testclient import TestClient
 

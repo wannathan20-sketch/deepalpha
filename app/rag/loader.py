@@ -54,7 +54,11 @@ def _domain(url: str) -> str:
 def _source_type(url: str, provider: str = "") -> str:
     if provider == "blockbeats":
         return "vertical_crypto_media"
+    if provider == "x":
+        return "social"
     domain = _domain(url)
+    if domain in {"x.com", "twitter.com"} or domain.endswith((".x.com", ".twitter.com")):
+        return "social"
     if domain.endswith("sec.gov"):
         return "regulatory_filing"
     if domain.endswith(("hkexnews.hk", "hkex.com.hk")):

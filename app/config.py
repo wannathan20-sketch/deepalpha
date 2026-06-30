@@ -86,11 +86,15 @@ def validate_runtime_config() -> None:
         "brave": "BRAVE_SEARCH_API_KEY",
         "blockbeats": "BLOCKBEATS_API_KEY",
         "tavily": "TAVILY_API_KEY",
+        "serpapi": "SERPAPI_API_KEY",
+        "bocha": "BOCHA_API_KEY",
+        "searxng": "SEARXNG_BASE_URL",
+        "x": "X_MCP_SEARCH_URL",
     }
     unsupported = [provider for provider in providers if provider not in provider_keys]
     if unsupported:
         raise RuntimeConfigurationError(
-            "Production SEARCH_PROVIDER must use brave, blockbeats, tavily, or multi."
+            "Production SEARCH_PROVIDER must use brave, blockbeats, tavily, serpapi, bocha, searxng, x, or multi."
         )
     if not any(os.getenv(provider_keys[provider], "").strip() for provider in providers):
         raise RuntimeConfigurationError(
@@ -111,6 +115,10 @@ def get_runtime_config() -> dict:
     tavily_api_key = os.getenv("TAVILY_API_KEY", "")
     brave_search_api_key = os.getenv("BRAVE_SEARCH_API_KEY", "")
     blockbeats_api_key = os.getenv("BLOCKBEATS_API_KEY", "")
+    serpapi_api_key = os.getenv("SERPAPI_API_KEY", "")
+    bocha_api_key = os.getenv("BOCHA_API_KEY", "")
+    searxng_base_url = os.getenv("SEARXNG_BASE_URL", "")
+    x_mcp_search_url = os.getenv("X_MCP_SEARCH_URL", "")
     rag_embedding_provider = os.getenv("RAG_EMBEDDING_PROVIDER", "hash").lower()
     llm_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat") if llm_provider == "deepseek" else openai_model
     llm_enabled = (
@@ -128,11 +136,19 @@ def get_runtime_config() -> dict:
             (search_provider == "tavily" and bool(tavily_api_key))
             or (search_provider == "brave" and bool(brave_search_api_key))
             or (search_provider == "blockbeats" and bool(blockbeats_api_key))
+            or (search_provider == "serpapi" and bool(serpapi_api_key))
+            or (search_provider == "bocha" and bool(bocha_api_key))
+            or (search_provider == "searxng" and bool(searxng_base_url))
+            or (search_provider == "x" and bool(x_mcp_search_url))
             or search_provider == "multi"
         ),
         "tavily_enabled": bool(tavily_api_key),
         "brave_search_enabled": bool(brave_search_api_key),
         "blockbeats_enabled": bool(blockbeats_api_key),
+        "serpapi_enabled": bool(serpapi_api_key),
+        "bocha_enabled": bool(bocha_api_key),
+        "searxng_enabled": bool(searxng_base_url),
+        "x_mcp_enabled": bool(x_mcp_search_url),
         "rag_embedding_provider": rag_embedding_provider,
         "rag_full_text_fetch_enabled": _env_bool("RAG_FETCH_FULL_TEXT", False),
         "rag_chunk_size": get_int_env("RAG_CHUNK_SIZE", 900),

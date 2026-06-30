@@ -224,6 +224,171 @@ def test_blockbeats_search_provider(monkeypatch) -> None:
     assert "BTC ETF" in results[0]["snippet"]
 
 
+def test_x_search_provider_uses_mcp_adapter(monkeypatch) -> None:
+    from app.tools.search import search_public_info
+
+    def fake_post(url, headers=None, json=None, timeout=10):
+        assert url == "http://127.0.0.1:8787/search"
+        assert headers["Authorization"] == "Bearer x-adapter-key"
+        assert json == {"query": "Tesla sentiment", "limit": 5}
+        return FakeSearchResponse(
+            {
+                "results": [
+                    {
+                        "author": "Tesla",
+                        "text": "Q2 delivery discussion is active on X.",
+                        "url": "https://x.com/tesla/status/123",
+                        "created_at": "2026-06-30T10:00:00Z",
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setenv("SEARCH_PROVIDER", "x")
+    monkeypatch.setenv("X_MCP_SEARCH_URL", "http://127.0.0.1:8787/search")
+    monkeypatch.setenv("X_MCP_API_KEY", "x-adapter-key")
+    monkeypatch.setattr("app.tools.search.requests.post", fake_post)
+
+    results = search_public_info("Tesla sentiment")
+
+    assert results == [
+        {
+            "title": "X: Tesla",
+            "url": "https://x.com/tesla/status/123",
+            "snippet": "Q2 delivery discussion is active on X.",
+            "published_at": "2026-06-30T10:00:00Z",
+            "provider": "x",
+            "source_type": "social",
+        }
+    ]
+
+
+def test_x_source_type_is_social() -> None:
+    from app.rag.loader import _source_type
+
+    assert _source_type("https://x.com/tesla/status/123", "x") == "social"
+    assert _source_type("https://twitter.com/tesla/status/123") == "social"
+
+
+def test_serpapi_search_provider(monkeypatch) -> None:
+    from app.tools.search import search_public_info
+
+    def fake_get(url, headers=None, params=None, timeout=10):
+        assert url == "https://serpapi.com/search.json"
+        assert params["api_key"] == "serpapi-key"
+        assert params["engine"] == "google"
+        assert params["q"] == "Tesla earnings"
+        assert params["num"] == 5
+        return FakeSearchResponse(
+            {
+                "organic_results": [
+                    {
+                        "title": "Tesla earnings analysis",
+                        "link": "https://example.com/tesla-earnings",
+                        "snippet": "Tesla reports margin changes.",
+                        "date": "Jun 30, 2026",
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setenv("SEARCH_PROVIDER", "serpapi")
+    monkeypatch.setenv("SERPAPI_API_KEY", "serpapi-key")
+    monkeypatch.setattr("app.tools.search.requests.get", fake_get)
+
+    results = search_public_info("Tesla earnings")
+
+    assert results == [
+        {
+            "title": "Tesla earnings analysis",
+            "url": "https://example.com/tesla-earnings",
+            "snippet": "Tesla reports margin changes.",
+            "published_at": "Jun 30, 2026",
+            "provider": "serpapi",
+        }
+    ]
+
+
+def test_bocha_search_provider(monkeypatch) -> None:
+    from app.tools.search import search_public_info
+
+    def fake_post(url, headers=None, json=None, timeout=10):
+        assert url == "https://api.bocha.cn/v1/web-search"
+        assert headers["Authorization"] == "Bearer bocha-key"
+        assert json["query"] == "贵州茅台 财报"
+        assert json["summary"] is True
+        return FakeSearchResponse(
+            {
+                "code": 200,
+                "data": {
+                    "webPages": {
+                        "value": [
+                            {
+                                "name": "贵州茅台财报解读",
+                                "url": "https://finance.example.cn/maotai",
+                                "summary": "贵州茅台收入和利润保持增长。",
+                                "datePublished": "2026-06-30",
+                            }
+                        ]
+                    }
+                },
+            }
+        )
+
+    monkeypatch.setenv("SEARCH_PROVIDER", "bocha")
+    monkeypatch.setenv("BOCHA_API_KEY", "bocha-key")
+    monkeypatch.setattr("app.tools.search.requests.post", fake_post)
+
+    results = search_public_info("贵州茅台 财报")
+
+    assert results == [
+        {
+            "title": "贵州茅台财报解读",
+            "url": "https://finance.example.cn/maotai",
+            "snippet": "贵州茅台收入和利润保持增长。",
+            "published_at": "2026-06-30",
+            "provider": "bocha",
+        }
+    ]
+
+
+def test_searxng_search_provider(monkeypatch) -> None:
+    from app.tools.search import search_public_info
+
+    def fake_get(url, headers=None, params=None, timeout=10):
+        assert url == "https://searx.example.org/search"
+        assert params["q"] == "NVDA AI demand"
+        assert params["format"] == "json"
+        return FakeSearchResponse(
+            {
+                "results": [
+                    {
+                        "title": "NVDA AI demand update",
+                        "url": "https://example.com/nvda-ai",
+                        "content": "AI accelerator demand remains strong.",
+                        "publishedDate": "2026-06-30T00:00:00Z",
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setenv("SEARCH_PROVIDER", "searxng")
+    monkeypatch.setenv("SEARXNG_BASE_URL", "https://searx.example.org")
+    monkeypatch.setattr("app.tools.search.requests.get", fake_get)
+
+    results = search_public_info("NVDA AI demand")
+
+    assert results == [
+        {
+            "title": "NVDA AI demand update",
+            "url": "https://example.com/nvda-ai",
+            "snippet": "AI accelerator demand remains strong.",
+            "published_at": "2026-06-30T00:00:00Z",
+            "provider": "searxng",
+        }
+    ]
+
+
 def test_multi_search_provider_merges_results(monkeypatch) -> None:
     from app.tools.search import search_public_info
 

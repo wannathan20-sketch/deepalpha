@@ -189,6 +189,157 @@ def _search_with_blockbeats(query: str, api_key: str, limit: int = 5) -> list[di
     return results[:limit]
 
 
+def _search_with_serpapi(query: str, api_key: str, limit: int = 5) -> list[dict]:
+    response = requests.get(
+        "https://serpapi.com/search.json",
+        params={
+            "engine": os.getenv("SERPAPI_ENGINE", "google"),
+            "q": query,
+            "api_key": api_key,
+            "num": limit,
+            "hl": os.getenv("SERPAPI_HL", "zh-cn"),
+            "gl": os.getenv("SERPAPI_GL", "cn"),
+        },
+        timeout=DEFAULT_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+
+    data = response.json()
+    results = []
+    for item in data.get("organic_results", []):
+        snippet_parts = [
+            item.get("snippet", ""),
+            " ".join(item.get("snippet_highlighted_words", []) or []),
+        ]
+        rich_snippet = item.get("rich_snippet") or {}
+        if isinstance(rich_snippet, dict):
+            for section in rich_snippet.values():
+                if not isinstance(section, dict):
+                    continue
+                extensions = section.get("extensions")
+                if isinstance(extensions, list):
+                    snippet_parts.extend(str(value) for value in extensions)
+                detected = section.get("detected_extensions")
+                if isinstance(detected, dict):
+                    snippet_parts.extend(f"{key}: {value}" for key, value in detected.items())
+        results.append(
+            {
+                "title": item.get("title", ""),
+                "url": item.get("link") or item.get("url") or "",
+                "snippet": _normalize_text(" ".join(snippet_parts)),
+                "published_at": item.get("date", ""),
+                "provider": "serpapi",
+            }
+        )
+
+    return results[:limit]
+
+
+def _search_with_bocha(query: str, api_key: str, limit: int = 5) -> list[dict]:
+    response = requests.post(
+        "https://api.bocha.cn/v1/web-search",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "query": query,
+            "freshness": os.getenv("BOCHA_FRESHNESS", "oneWeek"),
+            "summary": True,
+            "count": min(limit, 50),
+        },
+        timeout=DEFAULT_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+
+    data = response.json()
+    if data.get("code") not in {None, 200}:
+        raise ValueError(str(data.get("msg") or f"Bocha API returned code {data.get('code')}"))
+
+    value_list = data.get("data", {}).get("webPages", {}).get("value", [])
+    results = []
+    for item in value_list:
+        results.append(
+            {
+                "title": item.get("name") or item.get("title") or "",
+                "url": item.get("url", ""),
+                "snippet": _normalize_text(item.get("summary") or item.get("snippet") or ""),
+                "published_at": item.get("datePublished", ""),
+                "provider": "bocha",
+            }
+        )
+
+    return results[:limit]
+
+
+def _search_with_searxng(query: str, base_url: str, limit: int = 5) -> list[dict]:
+    search_url = f"{base_url.rstrip('/')}/search"
+    response = requests.get(
+        search_url,
+        params={
+            "q": query,
+            "format": "json",
+            "language": os.getenv("SEARXNG_LANGUAGE", "auto"),
+            "time_range": os.getenv("SEARXNG_TIME_RANGE", ""),
+            "safesearch": os.getenv("SEARXNG_SAFESEARCH", "0"),
+        },
+        timeout=DEFAULT_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+
+    data = response.json()
+    results = []
+    for item in data.get("results", []):
+        results.append(
+            {
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "snippet": _normalize_text(item.get("content") or item.get("description") or ""),
+                "published_at": item.get("publishedDate") or item.get("published_at") or "",
+                "provider": "searxng",
+            }
+        )
+
+    return results[:limit]
+
+
+def _search_with_x_mcp(query: str, search_url: str, limit: int = 5) -> list[dict]:
+    headers = {"Accept": "application/json"}
+    api_key = os.getenv("X_MCP_API_KEY", "").strip()
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    response = requests.post(
+        search_url,
+        headers=headers,
+        json={"query": query, "limit": limit},
+        timeout=DEFAULT_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+
+    data = response.json()
+    items = data.get("results") or data.get("tweets") or data.get("data") or []
+    results = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text") or item.get("content") or item.get("snippet") or ""
+        author = item.get("author") or item.get("username") or item.get("user") or ""
+        title = item.get("title") or f"X: {author or query}"
+        results.append(
+            {
+                "title": title,
+                "url": item.get("url") or item.get("link") or "",
+                "snippet": _normalize_text(text),
+                "published_at": item.get("created_at") or item.get("published_at") or item.get("date") or "",
+                "provider": "x",
+                "source_type": "social",
+            }
+        )
+
+    return results[:limit]
+
+
 def _configured_providers() -> list[str]:
     provider_value = os.getenv("SEARCH_PROVIDER", "mock").lower()
     if provider_value == "multi":
@@ -206,6 +357,14 @@ def _search_provider(search_provider: str, query: str, limit: int) -> list[dict]
         return _search_with_brave(query, os.getenv("BRAVE_SEARCH_API_KEY", ""), limit)
     if search_provider == "blockbeats" and os.getenv("BLOCKBEATS_API_KEY"):
         return _search_with_blockbeats(query, os.getenv("BLOCKBEATS_API_KEY", ""), limit)
+    if search_provider == "serpapi" and os.getenv("SERPAPI_API_KEY"):
+        return _search_with_serpapi(query, os.getenv("SERPAPI_API_KEY", ""), limit)
+    if search_provider == "bocha" and os.getenv("BOCHA_API_KEY"):
+        return _search_with_bocha(query, os.getenv("BOCHA_API_KEY", ""), limit)
+    if search_provider == "searxng" and os.getenv("SEARXNG_BASE_URL"):
+        return _search_with_searxng(query, os.getenv("SEARXNG_BASE_URL", ""), limit)
+    if search_provider == "x" and os.getenv("X_MCP_SEARCH_URL"):
+        return _search_with_x_mcp(query, os.getenv("X_MCP_SEARCH_URL", ""), limit)
     return []
 
 
