@@ -36,6 +36,7 @@ def test_readme_links_quick_start_and_project_showcase_screenshot() -> None:
     assert "bash scripts/dev.sh" in content
     assert "docker compose up --build" in content
     assert "## 项目展示" in content
-    assert "docs/images/deepalpha-market-review.png" in content
+    assert "docs/images/deepalpha-showcase.png" in content
+    assert "docs/images/deepalpha-market-review.png" not in content
     assert "docs/images/deepalpha-workbench.png" not in content
     assert "docs/images/deepalpha-report.png" not in content

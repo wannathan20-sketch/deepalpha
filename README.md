@@ -8,7 +8,7 @@ DeepAlpha 是一个面向 A 股、港股和美股的多智能体投研系统。�
 
 ## 项目展示
 
-![DeepAlpha 市场复盘](docs/images/deepalpha-market-review.png)
+![DeepAlpha 项目展示](docs/images/deepalpha-showcase.png)
 
 ## 项目交付目标
 
