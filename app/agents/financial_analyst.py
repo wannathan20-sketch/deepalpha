@@ -14,6 +14,8 @@ def _build_financial_profile_text(financial_profile: dict) -> str:
     if not financial_profile.get("enabled"):
         return f"财报摘要不可用：{financial_profile.get('reason', '未提供结构化财报数据。')}"
 
+    lines: list[str] = []
+
     fields = [
         ("Symbol", financial_profile.get("symbol")),
         ("Source", financial_profile.get("source")),
@@ -30,15 +32,97 @@ def _build_financial_profile_text(financial_profile: dict) -> str:
         ("Net Income Change %", financial_profile.get("net_income_change_percent")),
         ("EPS Diluted", financial_profile.get("eps_diluted")),
         ("Operating Cash Flow", financial_profile.get("operating_cash_flow")),
+        ("Operating Cash Flow Change %", financial_profile.get("operating_cash_flow_change_percent")),
         ("Free Cash Flow", financial_profile.get("free_cash_flow")),
         ("Cash", financial_profile.get("cash")),
         ("Debt", financial_profile.get("debt")),
+        ("Short-term Debt", financial_profile.get("short_term_debt")),
+        ("Long-term Debt", financial_profile.get("long_term_debt")),
         ("Total Assets", financial_profile.get("total_assets")),
         ("Total Liabilities", financial_profile.get("total_liabilities")),
         ("Shareholders Equity", financial_profile.get("shareholders_equity")),
         ("Filing URL", financial_profile.get("filing_url")),
     ]
-    return "\n".join(f"{label}: {value}" for label, value in fields if value not in {None, ""})
+    lines.append("\n".join(f"{label}: {value}" for label, value in fields if value not in {None, ""}))
+
+    # Management guidance / analyst consensus
+    mgmt = financial_profile.get("management_guidance", {})
+    if mgmt.get("enabled"):
+        consensus = mgmt.get("analyst_consensus", {})
+        if consensus:
+            lines.append("\n分析师盈利预测共识：")
+            for k, v in consensus.items():
+                if v is not None and v != 0:
+                    lines.append(f"  {k}: {v}")
+        broker_estimates = mgmt.get("broker_estimates", [])
+        if broker_estimates:
+            lines.append(f"券商预测（共 {len(broker_estimates)} 条）：")
+            for est in broker_estimates[:5]:
+                lines.append(f"  {est.get('broker', '')} FY{est.get('fiscal_year', '')}: EPS={est.get('eps')}, 目标价={est.get('target_price')}, 评级={est.get('rating')}")
+
+    # Announcement type breakdown
+    ann_summary = financial_profile.get("announcement_summary", {})
+    if ann_summary:
+        lines.append("\n公告类型分布：")
+        for ct, anns in sorted(ann_summary.items()):
+            lines.append(f"  {ct}: {len(anns)} 条")
+
+    # Dividends
+    dividends = financial_profile.get("dividends", [])
+    if dividends:
+        lines.append(f"\n分红记录（共 {len(dividends)} 条）：")
+        for d in dividends[:5]:
+            lines.append(f"  FY{d.get('fiscal_year', '')}: {d.get('scheme', '')} (除净日 {d.get('ex_date', '')})")
+
+    # Segment data
+    seg = financial_profile.get("segment_data", {})
+    if seg.get("enabled"):
+        lines.append(f"\n分业务收入结构（报告期 {seg.get('report_date', '')}）：")
+        for key, label in [("by_product", "按产品"), ("by_industry", "按行业"), ("by_region", "按地区")]:
+            items = seg.get(key, [])
+            if items:
+                lines.append(f"\n  {label}分类：")
+                for item in items:
+                    parts = [item.get("segment", "")]
+                    rev = item.get("revenue")
+                    rev_pct = item.get("revenue_pct")
+                    gm = item.get("gross_margin")
+                    if rev is not None:
+                        parts.append(f"收入 {rev:,.0f}")
+                    if rev_pct is not None:
+                        parts.append(f"占比 {rev_pct}%")
+                    if gm is not None:
+                        parts.append(f"毛利率 {gm}%")
+                    lines.append(f"    {'，'.join(parts)}")
+
+    # Official management earnings guidance
+    eg = financial_profile.get("earnings_guidance", {})
+    if eg.get("enabled"):
+        pas = eg.get("pre_announcements", [])
+        ers = eg.get("express_reports", [])
+        if pas:
+            lines.append(f"\n管理层正式业绩预告（共 {len(pas)} 条）：")
+            for pa in pas[:3]:
+                lines.append(
+                    f"  {pa.get('report_date', '')} {pa.get('forecast_type', '')}"
+                    f" | {pa.get('indicator', '')}"
+                    f" | {pa.get('change_description', '')}"
+                    f" | 变动幅度 {pa.get('change_range', '')}%"
+                )
+                reason = pa.get("change_reason", "")
+                if reason:
+                    lines.append(f"    原因：{reason}")
+        if ers:
+            lines.append(f"\n管理层正式业绩快报（共 {len(ers)} 条）：")
+            for er in ers[:3]:
+                lines.append(
+                    f"  {er.get('report_date', '')} {er.get('forecast_type', '')}"
+                    f" | {er.get('indicator', '')}"
+                    f" | {er.get('change_description', '')}"
+                    f" | 变动幅度 {er.get('change_range', '')}%"
+                )
+
+    return "\n".join(lines)
 
 
 def analyze(company_name: str, context: dict) -> dict:
@@ -74,15 +158,20 @@ def analyze(company_name: str, context: dict) -> dict:
             }
         )
 
+    risks = [
+        "公开搜索结果不能替代正式财报，收入、利润率和现金流需以公司披露文件复核。",
+    ]
+    if not financial_profile.get("segment_data", {}).get("enabled"):
+        risks.append("缺少分业务数据时，无法判断增长质量与利润贡献结构。")
+    if not financial_profile.get("earnings_guidance", {}).get("enabled"):
+        risks.append("缺少管理层正式业绩指引，盈利预测仅依赖分析师共识。")
+
     return structure_agent_result(
         agent="Financial Analyst",
         summary=summary,
         confidence=0.78 if financial_profile.get("enabled") else 0.72,
         sources=financial_sources + sources,
-        risks=[
-            "公开搜索结果不能替代正式财报，收入、利润率和现金流需以公司披露文件复核。",
-            "缺少分业务数据时，无法判断增长质量与利润贡献结构。",
-        ],
+        risks=risks,
         watch_items=[
             "收入增速",
             "毛利率",

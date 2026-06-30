@@ -259,19 +259,110 @@ def generate_markdown_report(
                 f"- Filing：{_sanitize_text(financial_profile.get('filing_type', ''))} / {_sanitize_text(financial_profile.get('fiscal_period', ''))}",
                 f"- Report Date：{_sanitize_text(financial_profile.get('report_date', ''))}",
                 f"- Revenue：{_sanitize_text(financial_profile.get('revenue', ''))}",
+                f"- Revenue Change %：{_sanitize_text(financial_profile.get('revenue_change_percent', ''))}",
                 f"- Gross Margin：{_sanitize_text(financial_profile.get('gross_margin_percent', ''))}%",
+                f"- Operating Income：{_sanitize_text(financial_profile.get('operating_income', ''))}",
                 f"- Operating Margin：{_sanitize_text(financial_profile.get('operating_margin_percent', ''))}%",
                 f"- Net Income：{_sanitize_text(financial_profile.get('net_income', ''))}",
+                f"- Net Income Change %：{_sanitize_text(financial_profile.get('net_income_change_percent', ''))}",
                 f"- EPS Diluted：{_sanitize_text(financial_profile.get('eps_diluted', ''))}",
                 f"- Operating Cash Flow：{_sanitize_text(financial_profile.get('operating_cash_flow', ''))}",
+                f"- OCF Change %：{_sanitize_text(financial_profile.get('operating_cash_flow_change_percent', ''))}",
                 f"- Free Cash Flow：{_sanitize_text(financial_profile.get('free_cash_flow', ''))}",
                 f"- Cash / Debt：{_sanitize_text(financial_profile.get('cash', ''))} / {_sanitize_text(financial_profile.get('debt', ''))}",
+                f"- Short-term / Long-term Debt：{_sanitize_text(financial_profile.get('short_term_debt', ''))} / {_sanitize_text(financial_profile.get('long_term_debt', ''))}",
                 f"- Total Assets / Liabilities：{_sanitize_text(financial_profile.get('total_assets', ''))} / {_sanitize_text(financial_profile.get('total_liabilities', ''))}",
+                f"- Shareholders Equity：{_sanitize_text(financial_profile.get('shareholders_equity', ''))}",
             ]
         )
         filing_url = _sanitize_url(financial_profile.get("filing_url", ""))
         if filing_url and filing_url != "#":
             lines.append(f"- Filing URL：[{_sanitize_text(financial_profile.get('source', 'filing'))}]({filing_url})")
+
+        # Management guidance section
+        mgmt = financial_profile.get("management_guidance", {})
+        if mgmt.get("enabled"):
+            lines.extend(["", "### 管理层指引与盈利预测", ""])
+            consensus = mgmt.get("analyst_consensus", {})
+            if consensus:
+                for k, v in consensus.items():
+                    if v is not None and v != 0 and v != "":
+                        lines.append(f"- {k}: {v}")
+            broker_estimates = mgmt.get("broker_estimates", [])
+            if broker_estimates:
+                lines.append(f"- 券商预测（共 {len(broker_estimates)} 条）：")
+                for est in broker_estimates[:5]:
+                    lines.append(f"  - {_sanitize_text(est.get('broker', ''))} FY{_sanitize_text(est.get('fiscal_year', ''))}: EPS={_sanitize_text(est.get('eps', ''))}, 目标价={_sanitize_text(est.get('target_price', ''))}, 评级={_sanitize_text(est.get('rating', ''))}")
+            if mgmt.get("warnings"):
+                for w in mgmt["warnings"]:
+                    lines.append(f"- ⚠️ {w}")
+
+        # Segment data (CN only)
+        seg = financial_profile.get("segment_data", {})
+        if seg.get("enabled"):
+            lines.extend(["", "### 分业务收入结构", ""])
+            for key, label in [("by_product", "按产品分类"), ("by_industry", "按行业分类"), ("by_region", "按地区分类")]:
+                items = seg.get(key, [])
+                if items:
+                    lines.append(f"**{label}**：")
+                    for item in items:
+                        parts = [item.get("segment", "")]
+                        rev = item.get("revenue")
+                        rev_pct = item.get("revenue_pct")
+                        gm = item.get("gross_margin")
+                        if rev is not None:
+                            parts.append(f"收入 {rev:,.0f}")
+                        if rev_pct is not None:
+                            parts.append(f"占比 {rev_pct}%")
+                        if gm is not None:
+                            parts.append(f"毛利率 {gm}%")
+                        lines.append(f"- {'，'.join(parts)}")
+            if seg.get("warnings"):
+                for w in seg["warnings"]:
+                    lines.append(f"- ⚠️ {w}")
+
+        # Official management earnings guidance (CN only)
+        eg = financial_profile.get("earnings_guidance", {})
+        if eg.get("enabled"):
+            pas = eg.get("pre_announcements", [])
+            ers = eg.get("express_reports", [])
+            if pas:
+                lines.extend(["", "### 管理层业绩预告", ""])
+                for pa in pas[:5]:
+                    lines.append(
+                        f"- {_sanitize_text(pa.get('report_date', ''))} {_sanitize_text(pa.get('forecast_type', ''))}"
+                        f" | {_sanitize_text(pa.get('indicator', ''))}"
+                        f" | {_sanitize_text(pa.get('change_description', ''))}"
+                    )
+                    reason = pa.get("change_reason", "")
+                    if reason:
+                        lines.append(f"  - 原因：{_sanitize_text(reason)}")
+            if ers:
+                lines.extend(["", "### 管理层业绩快报", ""])
+                for er in ers[:5]:
+                    lines.append(
+                        f"- {_sanitize_text(er.get('report_date', ''))} {_sanitize_text(er.get('forecast_type', ''))}"
+                        f" | {_sanitize_text(er.get('indicator', ''))}"
+                        f" | {_sanitize_text(er.get('change_description', ''))}"
+                    )
+            if eg.get("warnings"):
+                for w in eg["warnings"]:
+                    lines.append(f"- ⚠️ {w}")
+
+        # Announcement type breakdown
+        ann_summary = financial_profile.get("announcement_summary", {})
+        if ann_summary:
+            lines.extend(["", "### 公告类型分布", ""])
+            for ct, anns in sorted(ann_summary.items()):
+                lines.append(f"- {ct}: {len(anns)} 条")
+
+        # Dividends
+        dividends = financial_profile.get("dividends", [])
+        if dividends:
+            lines.extend(["", "### 分红记录", ""])
+            for d in dividends[:5]:
+                lines.append(f"- FY{d.get('fiscal_year', '')}: {_sanitize_text(d.get('scheme', ''))} (除净日 {_sanitize_text(d.get('ex_date', ''))})")
+
         summary_items = financial_profile.get("summary", [])
         if summary_items:
             lines.extend(["", "结构化摘要："])

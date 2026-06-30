@@ -71,12 +71,30 @@ ACCEPTED_FACT_FORMS = {"10-K", "10-Q", "20-F", "40-F", "6-K"}
 MONETARY_UNITS = {"USD", "EUR", "GBP", "CNY", "HKD", "JPY", "CAD", "AUD", "CHF", "SEK", "DKK", "NOK"}
 AKSHARE_FINANCIAL_FIELDS = [
     "revenue",
+    "gross_profit",
     "net_income",
     "gross_margin_percent",
     "net_margin_percent",
     "roe_percent",
     "debt_to_asset_percent",
     "operating_cash_flow",
+    "operating_income",
+    "operating_margin_percent",
+    "eps_diluted",
+    "cash",
+    "debt",
+    "short_term_debt",
+    "long_term_debt",
+    "total_assets",
+    "total_liabilities",
+    "shareholders_equity",
+]
+ANNOUNCEMENT_TYPES = [
+    "财务报告",
+    "重大事项",
+    "资产重组",
+    "持股变动",
+    "融资公告",
 ]
 ANNOUNCEMENT_LOOKBACK_DAYS = 730
 
@@ -236,35 +254,91 @@ def _safe_akshare_records(function: object, *args, **kwargs) -> tuple[list[dict]
 
 
 def _announcement_records(ak: object, symbol: MarketSymbol) -> tuple[list[dict], list[str]]:
+    """Fetch announcements across multiple types for a given stock."""
     function = getattr(ak, "stock_individual_notice_report", None)
     if function is None:
         return [], []
 
     end_date = datetime.now().date()
     begin_date = end_date - timedelta(days=ANNOUNCEMENT_LOOKBACK_DAYS)
-    records, error = _safe_akshare_records(
-        function,
-        symbol.local_symbol,
-        symbol="财务报告",
-        begin_date=begin_date.strftime("%Y%m%d"),
-        end_date=end_date.strftime("%Y%m%d"),
-    )
-    return records, [error] if error else []
+    all_records: list[dict] = []
+    all_errors: list[str] = []
+
+    for ann_type in ANNOUNCEMENT_TYPES:
+        records, error = _safe_akshare_records(
+            function,
+            symbol.local_symbol,
+            symbol=ann_type,
+            begin_date=begin_date.strftime("%Y%m%d"),
+            end_date=end_date.strftime("%Y%m%d"),
+        )
+        if records:
+            for record in records:
+                record["_fetch_type"] = ann_type
+            all_records.extend(records)
+        if error:
+            all_errors.append(f"{ann_type}:{error}")
+
+    # Deduplicate by URL or title when records appear in multiple type queries
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for record in all_records:
+        key = str(record.get("网址") or record.get("公告链接") or record.get("url") or record.get("公告标题", ""))
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(record)
+        elif not key:
+            deduped.append(record)
+
+    return deduped, all_errors
+
+
+def _classify_announcement_type(title: str, raw_type: str, fetch_type: str) -> str:
+    """Classify announcement into standardized category based on title keywords and fetch type."""
+    title_lower = title.lower()
+    type_keywords = [
+        ("performance_forecast", ["业绩预告", "业绩快报", "业绩预", "盈利预", "利润预"]),
+        ("material_contract", ["重大合同", "合同签订", "合同公告", "中标", "框架协议"]),
+        ("shareholder_meeting", ["股东大会", "临时股东", "年度股东", "股东周年大会"]),
+        ("capital_change", ["股本变动", "股份变动", "回购", "增持", "减持", "股权变更", "注册资本"]),
+        ("related_party", ["关联交易", "关联方", "关联人"]),
+        ("dividend", ["分红", "派息", "权益分派", "利润分配", "股息"]),
+        ("financial_report", ["财务报告", "年报", "半年报", "季报", "年度报告", "中期报告", "季度报告", "业绩公告", "annual report", "interim report"]),
+        ("asset_restructuring", ["资产重组", "重大资产重组", "并购", "收购", "重组"]),
+        ("financing", ["融资", "增发", "配股", "可转债", "债券", "非公开发行", "IPO"]),
+        ("risk_warning", ["风险提示", "退市风险", "ST", "特别处理", "立案调查", "行政处罚"]),
+        ("info_change", ["变更", "换届", "辞职", "聘任", "章程"]),
+    ]
+    for classified, keywords in type_keywords:
+        for kw in keywords:
+            if kw in title_lower:
+                return classified
+    fetch_map = {
+        "财务报告": "financial_report",
+        "重大事项": "material_event",
+        "资产重组": "asset_restructuring",
+        "持股变动": "capital_change",
+        "融资公告": "financing",
+    }
+    return fetch_map.get(fetch_type, "other")
 
 
 def _announcements_from_records(records: list[dict], source: str) -> list[dict]:
     announcements = []
-    for record in sorted(records, key=lambda item: _record_date(item), reverse=True)[:5]:
+    for record in sorted(records, key=lambda item: _record_date(item), reverse=True):
         title = _extract_text(record, ["公告标题", "标题", "title", "NOTICE_TITLE", "ANNOUNCEMENT_TITLE"])
         url = _extract_text(record, ["公告链接", "链接", "url", "URL", "attach_url", "ATTACHMENT_URL"])
         if not title and not url:
             continue
+        raw_type = _extract_text(record, ["公告类型", "类型", "notice_type", "ANNOUNCEMENT_TYPE"])
+        fetch_type = str(record.get("_fetch_type", ""))
         announcements.append(
             {
                 "date": _record_date(record),
                 "title": title,
                 "url": url,
-                "type": _extract_text(record, ["公告类型", "类型", "notice_type", "ANNOUNCEMENT_TYPE"]),
+                "type": raw_type,
+                "classified_type": _classify_announcement_type(title, raw_type, fetch_type),
                 "source": source,
             }
         )
@@ -280,22 +354,70 @@ def _akshare_summary(profile: dict) -> list[str]:
     net_income = profile.get("net_income")
     gross_margin = profile.get("gross_margin_percent")
     net_margin = profile.get("net_margin_percent")
+    operating_income = profile.get("operating_income")
+    operating_margin = profile.get("operating_margin_percent")
     roe = profile.get("roe_percent")
     debt_to_asset = profile.get("debt_to_asset_percent")
     ocf = profile.get("operating_cash_flow")
+    eps = profile.get("eps_diluted")
+    cash = profile.get("cash")
+    debt = profile.get("debt")
+    equity = profile.get("shareholders_equity")
 
     if revenue is not None:
-        summary.append(f"最新披露收入为 {revenue:,}。")
+        line = f"最新披露收入为 {revenue:,}"
+        if profile.get("revenue_change_percent") is not None:
+            line += f"，可比期变化 {profile['revenue_change_percent']}%"
+        summary.append(line + "。")
     if net_income is not None:
-        summary.append(f"净利润为 {net_income:,}。")
+        line = f"净利润为 {net_income:,}"
+        if profile.get("net_income_change_percent") is not None:
+            line += f"，可比期变化 {profile['net_income_change_percent']}%"
+        summary.append(line + "。")
     if gross_margin is not None or net_margin is not None:
         summary.append(f"毛利率 {gross_margin if gross_margin is not None else '待补充'}%，净利率 {net_margin if net_margin is not None else '待补充'}%。")
+    if operating_income is not None or operating_margin is not None:
+        summary.append(f"营业利润 {operating_income if operating_income is not None else '待补充'}，营业利润率 {operating_margin if operating_margin is not None else '待补充'}%。")
+    if eps is not None:
+        summary.append(f"每股收益（稀释）为 {eps}。")
     if roe is not None or debt_to_asset is not None:
         summary.append(f"ROE {roe if roe is not None else '待补充'}%，资产负债率 {debt_to_asset if debt_to_asset is not None else '待补充'}%。")
     if ocf is not None:
-        summary.append(f"经营现金流为 {ocf:,}。")
+        line = f"经营现金流为 {ocf:,}"
+        if profile.get("operating_cash_flow_change_percent") is not None:
+            line += f"，可比期变化 {profile['operating_cash_flow_change_percent']}%"
+        summary.append(line + "。")
+    if cash is not None or debt is not None or equity is not None:
+        parts = []
+        if cash is not None:
+            parts.append(f"现金 {cash:,}")
+        if debt is not None:
+            parts.append(f"总债务 {debt:,}")
+        if equity is not None:
+            parts.append(f"股东权益 {equity:,}")
+        summary.append("；".join(parts) + "。")
     if profile.get("announcements"):
         summary.append(f"已获取 {len(profile['announcements'])} 条财报/公告链接。")
+    seg = profile.get("segment_data", {})
+    if seg.get("enabled"):
+        parts = []
+        for key, label in [("by_product", "产品"), ("by_industry", "行业"), ("by_region", "地区")]:
+            count = len(seg.get(key, []))
+            if count:
+                parts.append(f"{label}{count}项")
+        if parts:
+            summary.append(f"分业务数据已获取（{' / '.join(parts)}），报告期 {seg.get('report_date', '')}。")
+    eg = profile.get("earnings_guidance", {})
+    if eg.get("enabled"):
+        pa = len(eg.get("pre_announcements", []))
+        er = len(eg.get("express_reports", []))
+        if pa or er:
+            parts2 = []
+            if pa:
+                parts2.append(f"业绩预告{pa}条")
+            if er:
+                parts2.append(f"业绩快报{er}条")
+            summary.append(f"管理层正式业绩指引已获取（{'，'.join(parts2)}）。")
     return summary or ["财报来源已返回，但结构化字段仍需进一步映射。"]
 
 
@@ -514,21 +636,101 @@ AKSHARE_FIELD_CANDIDATES = {
     ],
     "total_assets": ["TOTAL_ASSETS", "资产总计", "总资产", "Total Assets"],
     "total_liabilities": ["TOTAL_LIABILITIES", "负债合计", "总负债", "Total Liabilities"],
+    "eps_diluted": [
+        "DILUTED_EPS",
+        "DILUTEDEPS",
+        "稀释每股收益",
+        "稀释每股收益(元)",
+        "基本每股收益",
+        "每股收益",
+    ],
+    "operating_income": [
+        "OPERATE_PROFIT",
+        "OPERATING_PROFIT",
+        "营业利润",
+        "营业利润(万元)",
+    ],
+    "cash": [
+        "MONETARYFUNDS",
+        "货币资金",
+        "货币资金(万元)",
+        "现金及现金等价物",
+    ],
+    "short_term_debt": [
+        "SHORT_LOAN",
+        "短期借款",
+        "短期借款(万元)",
+    ],
+    "long_term_debt": [
+        "LONG_LOAN",
+        "长期借款",
+        "长期借款(万元)",
+    ],
+    "shareholders_equity": [
+        "TOTAL_EQUITY",
+        "TOTAL_PARENT_EQUITY",
+        "股东权益合计",
+        "归属于母公司股东权益合计",
+        "归属于母公司所有者权益合计",
+        "所有者权益合计",
+    ],
 }
 
 
-def _akshare_values_from_record(record: dict, cash_flow_record: dict | None = None) -> dict:
+def _akshare_values_from_record(
+    record: dict,
+    cash_flow_record: dict | None = None,
+    balance_sheet_record: dict | None = None,
+    profit_sheet_record: dict | None = None,
+) -> dict:
     cash_flow_record = cash_flow_record or {}
+    balance_sheet_record = balance_sheet_record or {}
+    profit_sheet_record = profit_sheet_record or {}
+
     values = {
         key: _extract_numeric(record, candidates)
         for key, candidates in AKSHARE_FIELD_CANDIDATES.items()
     }
+
+    # Cash flow fallback
     if values["operating_cash_flow"] is None and cash_flow_record:
         values["operating_cash_flow"] = _extract_numeric(cash_flow_record, AKSHARE_FIELD_CANDIDATES["operating_cash_flow"])
+
+    # Balance sheet fallback — cash, debt, equity
+    if values["cash"] is None and balance_sheet_record:
+        values["cash"] = _extract_numeric(balance_sheet_record, AKSHARE_FIELD_CANDIDATES["cash"])
+    if values["shareholders_equity"] is None and balance_sheet_record:
+        values["shareholders_equity"] = _extract_numeric(balance_sheet_record, AKSHARE_FIELD_CANDIDATES["shareholders_equity"])
+    if values["total_assets"] is None and balance_sheet_record:
+        values["total_assets"] = _extract_numeric(balance_sheet_record, AKSHARE_FIELD_CANDIDATES["total_assets"])
+    if values["total_liabilities"] is None and balance_sheet_record:
+        values["total_liabilities"] = _extract_numeric(balance_sheet_record, AKSHARE_FIELD_CANDIDATES["total_liabilities"])
+    short_term = (
+        _extract_numeric(balance_sheet_record, AKSHARE_FIELD_CANDIDATES["short_term_debt"])
+        if values["short_term_debt"] is None else values["short_term_debt"]
+    )
+    long_term = (
+        _extract_numeric(balance_sheet_record, AKSHARE_FIELD_CANDIDATES["long_term_debt"])
+        if values["long_term_debt"] is None else values["long_term_debt"]
+    )
+    values["short_term_debt"] = short_term
+    values["long_term_debt"] = long_term
+    if short_term is not None or long_term is not None:
+        values["debt"] = (short_term or 0) + (long_term or 0)
+
+    # Profit sheet fallback — EPS, operating income
+    if values["eps_diluted"] is None and profit_sheet_record:
+        values["eps_diluted"] = _extract_numeric(profit_sheet_record, AKSHARE_FIELD_CANDIDATES["eps_diluted"])
+    if values["operating_income"] is None and profit_sheet_record:
+        values["operating_income"] = _extract_numeric(profit_sheet_record, AKSHARE_FIELD_CANDIDATES["operating_income"])
+
+    # Computed fields
     if values["total_assets"] and values["total_liabilities"] and values["debt_to_asset_percent"] is None:
         values["debt_to_asset_percent"] = _pct(values["total_liabilities"], values["total_assets"])
     if values["revenue"] and values["gross_margin_percent"] is not None and values["gross_profit"] is None:
         values["gross_profit"] = _round_number(values["revenue"] * values["gross_margin_percent"] / 100)
+    if values["revenue"] and values["operating_income"] is not None:
+        values["operating_margin_percent"] = _pct(values["operating_income"], values["revenue"])
     return values
 
 
@@ -541,6 +743,12 @@ def _akshare_profile_from_values(
     values: dict,
     announcements: list[dict],
     errors: list[str],
+    prev_values: dict | None = None,
+    management_guidance: dict | None = None,
+    segment_data: dict | None = None,
+    earnings_guidance: dict | None = None,
+    dividends: list[dict] | None = None,
+    capital_flow_context: dict | None = None,
 ) -> dict:
     missing_fields = [field for field in AKSHARE_FINANCIAL_FIELDS if values.get(field) is None]
     has_metric = any(value is not None for value in values.values())
@@ -558,6 +766,12 @@ def _akshare_profile_from_values(
         }
 
     status = "partial" if missing_fields or not has_metric else "available"
+    # Build announcement summary grouped by classified type
+    ann_summary: dict[str, list[dict]] = {}
+    for ann in announcements:
+        ct = ann.get("classified_type", "other")
+        ann_summary.setdefault(ct, []).append(ann)
+
     profile = {
         "enabled": True,
         "context_status": status,
@@ -573,23 +787,34 @@ def _akshare_profile_from_values(
         "revenue": values.get("revenue"),
         "gross_profit": values.get("gross_profit"),
         "gross_margin_percent": values.get("gross_margin_percent"),
-        "operating_income": None,
-        "operating_margin_percent": None,
+        "operating_income": values.get("operating_income"),
+        "operating_margin_percent": values.get("operating_margin_percent"),
         "net_income": values.get("net_income"),
         "net_margin_percent": values.get("net_margin_percent"),
-        "eps_diluted": None,
+        "eps_diluted": values.get("eps_diluted"),
         "operating_cash_flow": values.get("operating_cash_flow"),
         "capex": None,
         "free_cash_flow": None,
-        "cash": None,
-        "debt": None,
+        "cash": values.get("cash"),
+        "debt": values.get("debt"),
+        "short_term_debt": values.get("short_term_debt"),
+        "long_term_debt": values.get("long_term_debt"),
         "total_assets": values.get("total_assets"),
         "total_liabilities": values.get("total_liabilities"),
-        "shareholders_equity": None,
+        "shareholders_equity": values.get("shareholders_equity"),
         "roe_percent": values.get("roe_percent"),
         "debt_to_asset_percent": values.get("debt_to_asset_percent"),
+        "revenue_change_percent": _change(values.get("revenue"), (prev_values or {}).get("revenue")),
+        "net_income_change_percent": _change(values.get("net_income"), (prev_values or {}).get("net_income")),
+        "operating_cash_flow_change_percent": _change(values.get("operating_cash_flow"), (prev_values or {}).get("operating_cash_flow")),
         "missing_fields": missing_fields,
         "announcements": announcements,
+        "announcement_summary": ann_summary,
+        "management_guidance": management_guidance or {"enabled": False, "source": "", "warnings": []},
+        "segment_data": segment_data or {"enabled": False, "source": "", "warnings": []},
+        "earnings_guidance": earnings_guidance or {"enabled": False, "source": "", "warnings": []},
+        "dividends": dividends or [],
+        "capital_flow_context": capital_flow_context or {"enabled": False, "warnings": []},
         "metrics": {
             key: {"value": value, "source": source, "report_date": report_date}
             for key, value in values.items()
@@ -632,6 +857,41 @@ def _fetch_cn_cash_flow_records(ak: object, symbol: MarketSymbol) -> tuple[list[
     return records, [error] if error else []
 
 
+def _fetch_cn_balance_sheet_records(ak: object, symbol: MarketSymbol) -> tuple[list[dict], list[str]]:
+    """Fetch A-share balance sheet from Eastmoney via AkShare."""
+    function = getattr(ak, "stock_balance_sheet_by_report_em", None)
+    if function is None:
+        return [], []
+    records, error = _safe_akshare_records(function, symbol.canonical_symbol)
+    return records, [error] if error else []
+
+
+def _fetch_cn_profit_sheet_records(ak: object, symbol: MarketSymbol) -> tuple[list[dict], list[str]]:
+    """Fetch A-share income statement from Eastmoney via AkShare."""
+    function = getattr(ak, "stock_profit_sheet_by_report_em", None)
+    if function is None:
+        return [], []
+    records, error = _safe_akshare_records(function, symbol.canonical_symbol)
+    return records, [error] if error else []
+
+
+def _previous_period_record(records: list[dict], latest: dict) -> dict:
+    """Find the comparable prior-period record for YoY comparison.
+
+    Returns the most recent record with a date before the latest record.
+    """
+    if not records or not latest:
+        return {}
+    latest_date = _record_date(latest)
+    if not latest_date:
+        return {}
+    sorted_records = sorted(records, key=lambda r: _record_date(r), reverse=True)
+    for record in sorted_records:
+        if _record_date(record) < latest_date:
+            return record
+    return {}
+
+
 def _build_cn_financial_profile(symbol: MarketSymbol) -> dict:
     source = "akshare_cn"
     try:
@@ -651,10 +911,32 @@ def _build_cn_financial_profile(symbol: MarketSymbol) -> dict:
     records, errors = _fetch_cn_financial_records(ak, symbol)
     latest = _latest_record(records)
     cash_records, cash_errors = _fetch_cn_cash_flow_records(ak, symbol)
+    balance_records, balance_errors = _fetch_cn_balance_sheet_records(ak, symbol)
+    profit_records, profit_errors = _fetch_cn_profit_sheet_records(ak, symbol)
     announcements_records, announcement_errors = _announcement_records(ak, symbol)
     errors.extend(cash_errors)
+    errors.extend(balance_errors)
+    errors.extend(profit_errors)
     errors.extend(announcement_errors)
-    values = _akshare_values_from_record(latest, _latest_record(cash_records)) if latest else {}
+
+    prev_record = _previous_period_record(records, latest)
+    values = (
+        _akshare_values_from_record(
+            latest,
+            _latest_record(cash_records),
+            _latest_record(balance_records),
+            _latest_record(profit_records),
+        )
+        if latest else {}
+    )
+    prev_values = _akshare_values_from_record(prev_record) if prev_record else {}
+
+    # Optional: profit forecast, segment data, official guidance, capital flow
+    mgmt_guidance = _fetch_cn_profit_forecast(ak, symbol)
+    segment_data = _fetch_cn_segment_data(ak, symbol)
+    earnings_guidance = _fetch_cn_official_guidance(ak, symbol)
+    capital_flow = _fetch_capital_flow_context(ak)
+
     return _akshare_profile_from_values(
         symbol=symbol,
         source=source,
@@ -663,6 +945,11 @@ def _build_cn_financial_profile(symbol: MarketSymbol) -> dict:
         values=values,
         announcements=_announcements_from_records(announcements_records, source),
         errors=errors,
+        prev_values=prev_values,
+        management_guidance=mgmt_guidance,
+        segment_data=segment_data,
+        earnings_guidance=earnings_guidance,
+        capital_flow_context=capital_flow,
     )
 
 
@@ -680,6 +967,371 @@ def _fetch_hk_cash_flow_records(ak: object, symbol: MarketSymbol) -> tuple[list[
         return [], []
     records, error = _safe_akshare_records(function, stock=symbol.local_symbol, symbol="现金流量表", indicator="年度")
     return records, [error] if error else []
+
+
+def _fetch_hk_balance_sheet_records(ak: object, symbol: MarketSymbol) -> tuple[list[dict], list[str]]:
+    """Fetch HK balance sheet from Eastmoney via AkShare.
+
+    Returns row-oriented records with STD_ITEM_NAME / AMOUNT columns.
+    """
+    function = getattr(ak, "stock_financial_hk_report_em", None)
+    if function is None:
+        return [], []
+    records, error = _safe_akshare_records(function, stock=symbol.local_symbol, symbol="资产负债表", indicator="年度")
+    return records, [error] if error else []
+
+
+def _fetch_hk_profit_sheet_records(ak: object, symbol: MarketSymbol) -> tuple[list[dict], list[str]]:
+    """Fetch HK income statement from Eastmoney via AkShare.
+
+    Returns row-oriented records with STD_ITEM_NAME / AMOUNT columns.
+    """
+    function = getattr(ak, "stock_financial_hk_report_em", None)
+    if function is None:
+        return [], []
+    records, error = _safe_akshare_records(function, stock=symbol.local_symbol, symbol="利润表", indicator="年度")
+    return records, [error] if error else []
+
+
+# Map HK Chinese line item names to internal field names for pivot.
+_HK_ITEM_MAP = {
+    "现金及现金等价物": "cash",
+    "现金及約當現金": "cash",
+    "货币资金": "cash",
+    "短期借款": "short_term_debt",
+    "长期借款": "long_term_debt",
+    "資產總額": "total_assets",
+    "资产总额": "total_assets",
+    "总资产": "total_assets",
+    "負債總額": "total_liabilities",
+    "负债总额": "total_liabilities",
+    "总负债": "total_liabilities",
+    "本公司权益持有人应占权益": "shareholders_equity",
+    "本公司權益持有人應佔權益": "shareholders_equity",
+    "股东权益": "shareholders_equity",
+    "權益總額": "shareholders_equity",
+    "权益总额": "shareholders_equity",
+    "營業利潤": "operating_income",
+    "营业利润": "operating_income",
+    "營業收入": "revenue",
+    "营业收入": "revenue",
+    "营业额": "revenue",
+    "營業額": "revenue",
+    "净利润": "net_income",
+    "淨利潤": "net_income",
+    "歸屬於母公司股東的淨利潤": "net_income",
+    "归属于母公司股东的净利润": "net_income",
+    "經營活動產生的現金流量淨額": "operating_cash_flow",
+    "经营活动产生的现金流量净额": "operating_cash_flow",
+    "基本每股收益": "eps_diluted",
+    "稀釋每股收益": "eps_diluted",
+    "稀释每股收益": "eps_diluted",
+}
+
+
+def _pivot_hk_row_records(records: list[dict]) -> list[dict]:
+    """Pivot HK row-oriented financial records to column-oriented per report date.
+
+    HK report functions return one row per line item (STD_ITEM_NAME + AMOUNT).
+    This pivots them to one row per report period with line items as columns.
+    """
+    if not records:
+        return []
+
+    # Determine which column holds the item name
+    item_col = _matching_column(records[0], ["STD_ITEM_NAME", "项目名称", "ITEM_NAME", "报表项目"])
+    amount_col = _matching_column(records[0], ["AMOUNT", "金额", "VALUE"])
+
+    pivoted: dict[str, dict] = {}
+    for record in records:
+        date = _record_date(record)
+        if not date:
+            continue
+        if date not in pivoted:
+            pivoted[date] = {"REPORT_DATE": date}
+
+        item_name = str(record.get(item_col, "") or "").strip()
+        amount = _coerce_number(record.get(amount_col))
+        if not item_name or amount is None:
+            continue
+
+        # Match item name to internal field
+        mapped_key = _HK_ITEM_MAP.get(item_name)
+        if mapped_key is None:
+            # Fuzzy match: check if any known name is contained in the item name
+            for hk_name, key in _HK_ITEM_MAP.items():
+                if hk_name in item_name or item_name in hk_name:
+                    mapped_key = key
+                    break
+        if mapped_key:
+            pivoted[date][mapped_key] = (pivoted[date].get(mapped_key, 0) or 0) + amount
+
+    return list(pivoted.values())
+
+
+def _fetch_cn_profit_forecast(ak: object, symbol: MarketSymbol) -> dict:
+    """Fetch CN analyst profit forecast consensus from Eastmoney."""
+    guidance: dict = {
+        "enabled": False,
+        "source": "",
+        "analyst_consensus": {},
+        "eps_forecast_range": {},
+        "warnings": [],
+    }
+    fn = getattr(ak, "stock_profit_forecast_em", None)
+    if fn is None:
+        guidance["warnings"].append("stock_profit_forecast_em not available")
+        return guidance
+    try:
+        df = fn(symbol=symbol.local_symbol)
+        if hasattr(df, "empty") and df.empty:
+            guidance["warnings"].append("No CN profit forecast data")
+            return guidance
+        row = df.iloc[0] if not getattr(df, "empty", True) else None
+        if row is None:
+            guidance["warnings"].append("No CN profit forecast rows")
+            return guidance
+        guidance["enabled"] = True
+        guidance["source"] = "akshare_profit_forecast_em"
+        guidance["analyst_consensus"] = {
+            "eps_current_year": _coerce_number(row.get("2026预测每股收益")),
+            "eps_next_year": _coerce_number(row.get("2027预测每股收益")),
+            "buy_count": int(row.get("机构投资评级(近六个月)-买入", 0) or 0),
+            "hold_count": (int(row.get("机构投资评级(近六个月)-增持", 0) or 0) + int(row.get("机构投资评级(近六个月)-中性", 0) or 0)),
+            "sell_count": (int(row.get("机构投资评级(近六个月)-减持", 0) or 0) + int(row.get("机构投资评级(近六个月)-卖出", 0) or 0)),
+            "total_analysts": int(row.get("研报数", 0) or 0),
+        }
+    except Exception as exc:
+        guidance["warnings"].append(f"CN profit forecast failed: {type(exc).__name__}")
+    return guidance
+
+
+def _fetch_cn_segment_data(ak: object, symbol: MarketSymbol) -> dict:
+    """Fetch CN segment revenue breakdown by product / industry / region from Eastmoney.
+    从东方财富获取 A 股主营业务构成（按产品、行业、地区分类）。
+    """
+    segment: dict = {
+        "enabled": False,
+        "source": "",
+        "report_date": "",
+        "by_product": [],
+        "by_industry": [],
+        "by_region": [],
+        "warnings": [],
+    }
+    fn = getattr(ak, "stock_zygc_em", None)
+    if fn is None:
+        segment["warnings"].append("stock_zygc_em not available")
+        return segment
+    try:
+        df = fn(symbol=f"{symbol.local_symbol}.{symbol.exchange}")
+        if hasattr(df, "empty") and df.empty:
+            segment["warnings"].append("No segment data returned")
+            return segment
+        latest_date = str(df["报告日期"].max())
+        latest_df = df[df["报告日期"].astype(str) == latest_date]
+        segment["enabled"] = True
+        segment["source"] = "akshare_stock_zygc_em"
+        segment["report_date"] = latest_date
+        category_map = {"按产品分类": "by_product", "按行业分类": "by_industry", "按地区分类": "by_region"}
+        for _, row in latest_df.iterrows():
+            cat = str(row.get("分类类型", ""))
+            key = category_map.get(cat)
+            if key is None:
+                continue
+            segment[key].append({
+                "segment": str(row.get("主营构成", "")),
+                "revenue": _coerce_number(row.get("主营收入")),
+                "revenue_pct": round((_coerce_number(row.get("收入比例")) or 0) * 100, 2),
+                "cost": _coerce_number(row.get("主营成本")),
+                "cost_pct": round((_coerce_number(row.get("成本比例")) or 0) * 100, 2),
+                "profit": _coerce_number(row.get("主营利润")),
+                "profit_pct": round((_coerce_number(row.get("利润比例")) or 0) * 100, 2),
+                "gross_margin": round((_coerce_number(row.get("毛利率")) or 0) * 100, 2),
+            })
+    except Exception as exc:
+        segment["warnings"].append(f"Segment data failed: {type(exc).__name__}")
+    return segment
+
+
+def _fetch_cn_official_guidance(ak: object, symbol: MarketSymbol) -> dict:
+    """Fetch official management earnings guidance from pre-announcements and express reports.
+    从东方财富获取管理层正式业绩指引（业绩预告 + 业绩快报）。
+    """
+    import calendar
+    from datetime import date
+
+    guidance: dict = {
+        "enabled": False,
+        "source": "",
+        "pre_announcements": [],
+        "express_reports": [],
+        "warnings": [],
+    }
+
+    # Build quarter-end lookback dates (AkShare yjyg/yjkb endpoints expect quarter-end)
+    today = date.today()
+    lookback_dates: list[str] = []
+    # Start from current quarter, walk back up to 4 quarters
+    quarter_end_month = ((today.month - 1) // 3 + 1) * 3
+    year = today.year
+    if quarter_end_month > 12:
+        quarter_end_month = 3
+        year += 1
+    for _ in range(5):  # try up to 5 quarters back
+        last_day = calendar.monthrange(year, quarter_end_month)[1]
+        qe = date(year, quarter_end_month, min(last_day, 31))
+        if qe <= today:
+            date_str = qe.strftime("%Y%m%d")
+            if date_str not in lookback_dates:
+                lookback_dates.append(date_str)
+        # Move back one quarter
+        quarter_end_month -= 3
+        if quarter_end_month < 1:
+            quarter_end_month = 12
+            year -= 1
+
+    # Part A: Earnings pre-announcements (业绩预告)
+    fn_yjyg = getattr(ak, "stock_yjyg_em", None)
+    if fn_yjyg is not None:
+        for date_str in lookback_dates:
+            try:
+                df = fn_yjyg(date=date_str)
+            except Exception:
+                continue  # this date may not have data yet, try the next one
+            if hasattr(df, "empty") and df.empty:
+                continue
+            stock_df = df[df["股票代码"].astype(str).str.strip() == symbol.local_symbol.strip()]
+            if stock_df.empty:
+                continue
+            for _, row in stock_df.iterrows():
+                guidance["pre_announcements"].append({
+                    "report_date": str(row.get("公告日期", "")),
+                    "indicator": str(row.get("预测指标", "")),
+                    "change_description": str(row.get("业绩变动", "")),
+                    "forecast_value": _coerce_number(row.get("预测数值")),
+                    "change_range": _coerce_number(row.get("业绩变动幅度")),
+                    "change_reason": str(row.get("业绩变动原因", "")),
+                    "forecast_type": str(row.get("预告类型", "")),
+                    "prior_year_value": _coerce_number(row.get("上年同期值")),
+                })
+            break  # Found data, stop trying older dates
+    else:
+        guidance["warnings"].append("stock_yjyg_em not available")
+
+    # Part B: Express reports (业绩快报)
+    fn_yjkb = getattr(ak, "stock_yjkb_em", None)
+    if fn_yjkb is not None:
+        for date_str in lookback_dates:
+            try:
+                df = fn_yjkb(date=date_str)
+            except Exception:
+                continue  # this date may not have data yet, try the next one
+            if hasattr(df, "empty") and df.empty:
+                continue
+            stock_df = df[df["股票代码"].astype(str).str.strip() == symbol.local_symbol.strip()]
+            if stock_df.empty:
+                continue
+            for _, row in stock_df.iterrows():
+                guidance["express_reports"].append({
+                    "report_date": str(row.get("公告日期", "")),
+                    "indicator": str(row.get("预测指标", "")),
+                    "change_description": str(row.get("业绩变动", "")),
+                    "forecast_value": _coerce_number(row.get("预测数值")),
+                    "change_range": _coerce_number(row.get("业绩变动幅度")),
+                    "change_reason": str(row.get("业绩变动原因", "")),
+                    "forecast_type": str(row.get("预告类型", "")),
+                    "prior_year_value": _coerce_number(row.get("上年同期值")),
+                })
+            break
+    else:
+        guidance["warnings"].append("stock_yjkb_em not available")
+
+    if guidance["pre_announcements"] or guidance["express_reports"]:
+        guidance["enabled"] = True
+        guidance["source"] = "akshare_stock_yjyg_em + akshare_stock_yjkb_em"
+
+    return guidance
+
+
+def _fetch_hk_profit_forecast(ak: object, symbol: MarketSymbol) -> dict:
+    """Fetch HK profit forecast from ETNET."""
+    fn = getattr(ak, "stock_hk_profit_forecast_et", None)
+    if fn is None:
+        return {"enabled": False, "source": "", "analyst_consensus": {}, "warnings": ["stock_hk_profit_forecast_et not available"]}
+    try:
+        df = fn(symbol=symbol.local_symbol, indicator="盈利预测概览")
+        if hasattr(df, "empty") and df.empty:
+            return {"enabled": False, "source": "akshare_hk_profit_forecast_et", "analyst_consensus": {}, "warnings": ["No HK profit forecast data"]}
+        broker_estimates: list[dict] = []
+        for _, row in df.iterrows():
+            broker_estimates.append({
+                "fiscal_year": str(row.get("财政年度", "")),
+                "profit": _coerce_number(row.get("纯利/亏损")),
+                "eps": _coerce_number(row.get("每股盈利")),
+                "dps": _coerce_number(row.get("每股派息")),
+                "broker": str(row.get("证券商", "")),
+                "rating": str(row.get("评级", "")),
+                "target_price": _coerce_number(row.get("目标价")),
+                "updated": str(row.get("更新日期", "")),
+            })
+        return {
+            "enabled": True,
+            "source": "akshare_hk_profit_forecast_et",
+            "analyst_consensus": {},
+            "broker_estimates": broker_estimates,
+            "warnings": [],
+        }
+    except Exception as exc:
+        return {"enabled": False, "source": "akshare_hk_profit_forecast_et", "analyst_consensus": {}, "warnings": [type(exc).__name__]}
+
+
+def _fetch_hk_dividends(ak: object, symbol: MarketSymbol) -> list[dict]:
+    """Fetch HK dividend payout history."""
+    fn = getattr(ak, "stock_hk_dividend_payout_em", None)
+    if fn is None:
+        return []
+    try:
+        df = fn(symbol=symbol.local_symbol)
+        if hasattr(df, "empty") and df.empty:
+            return []
+        dividends: list[dict] = []
+        for _, row in df.iterrows():
+            dividends.append({
+                "fiscal_year": str(row.get("财政年度", "")),
+                "scheme": str(row.get("分红方案", "")),
+                "type": str(row.get("分配类型", "")),
+                "ex_date": str(row.get("除净日", "")),
+                "payment_date": str(row.get("发放日", "")),
+                "announcement_date": str(row.get("最新公告日期", "")),
+            })
+        return dividends
+    except Exception:
+        return []
+
+
+def _fetch_capital_flow_context(ak: object) -> dict:
+    """Fetch North/South-bound capital flow summary (market-level, shared across CN/HK)."""
+    fn = getattr(ak, "stock_hsgt_fund_flow_summary_em", None)
+    if fn is None:
+        return {"enabled": False, "warnings": ["hsgt_fund_flow not available"]}
+    try:
+        df = fn()
+        if hasattr(df, "empty") and df.empty:
+            return {"enabled": False, "warnings": ["No capital flow data"]}
+        north = df[df["资金方向"] == "北向"]
+        south = df[df["资金方向"] == "南向"]
+        north_net = north["成交净买额"].sum() if not north.empty else None
+        south_net = south["成交净买额"].sum() if not south.empty else None
+        return {
+            "enabled": True,
+            "north_bound_net": _round_number(north_net) if north_net is not None else None,
+            "south_bound_net": _round_number(south_net) if south_net is not None else None,
+            "date": datetime.now().date().isoformat(),
+            "warnings": [],
+        }
+    except Exception as exc:
+        return {"enabled": False, "warnings": [type(exc).__name__]}
 
 
 def _build_hk_financial_profile(symbol: MarketSymbol) -> dict:
@@ -701,10 +1353,34 @@ def _build_hk_financial_profile(symbol: MarketSymbol) -> dict:
     records, errors = _fetch_hk_financial_records(ak, symbol)
     cash_records, cash_errors = _fetch_hk_cash_flow_records(ak, symbol)
     announcements_records, announcement_errors = _announcement_records(ak, symbol)
-    errors.extend(cash_errors)
-    errors.extend(announcement_errors)
     latest = _latest_record(records)
-    values = _akshare_values_from_record(latest, _latest_record(cash_records)) if latest else {}
+
+    # HK balance sheet / profit sheet are row-oriented; pivot to column-oriented
+    raw_balance_records, balance_errors = _fetch_hk_balance_sheet_records(ak, symbol)
+    balance_records = _pivot_hk_row_records(raw_balance_records)
+    raw_profit_records, profit_errors = _fetch_hk_profit_sheet_records(ak, symbol)
+    profit_records = _pivot_hk_row_records(raw_profit_records)
+
+    errors.extend(cash_errors)
+    errors.extend(balance_errors)
+    errors.extend(profit_errors)
+    errors.extend(announcement_errors)
+
+    values = (
+        _akshare_values_from_record(
+            latest,
+            _latest_record(cash_records),
+            _latest_record(balance_records),
+            _latest_record(profit_records),
+        )
+        if latest else {}
+    )
+
+    # Optional: profit forecast, dividends, capital flow
+    mgmt_guidance = _fetch_hk_profit_forecast(ak, symbol)
+    dividends = _fetch_hk_dividends(ak, symbol)
+    capital_flow = _fetch_capital_flow_context(ak)
+
     return _akshare_profile_from_values(
         symbol=symbol,
         source=source,
@@ -713,6 +1389,9 @@ def _build_hk_financial_profile(symbol: MarketSymbol) -> dict:
         values=values,
         announcements=_announcements_from_records(announcements_records, source),
         errors=errors,
+        management_guidance=mgmt_guidance,
+        dividends=dividends,
+        capital_flow_context=capital_flow,
     )
 
 
