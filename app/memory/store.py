@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -56,7 +57,9 @@ def ensure_schema(connection: sqlite3.Connection | None = None) -> None:
             recommendation TEXT,
             confidence REAL,
             sources_count INTEGER,
-            summary TEXT
+            summary TEXT,
+            markdown_report TEXT DEFAULT '',
+            result_json TEXT DEFAULT '{}'
         );
 
         CREATE INDEX IF NOT EXISTS idx_research_history_tenant_company
@@ -119,6 +122,19 @@ def ensure_schema(connection: sqlite3.Connection | None = None) -> None:
         """
     )
 
+    # Migrate existing tables that lack the full-report columns added in a later version.
+    # 兼容旧表：为已存在的 research_history 表补充全文报告列。
+    for col, col_type in [
+        ("markdown_report", "TEXT DEFAULT ''"),
+        ("result_json", "TEXT DEFAULT '{}'"),
+    ]:
+        try:
+            connection.execute(
+                f"ALTER TABLE research_history ADD COLUMN {col} {col_type}"
+            )
+        except sqlite3.OperationalError:
+            pass  # Column already exists — fine.
+
     if owns_connection:
         connection.commit()
         connection.close()
@@ -135,6 +151,8 @@ def save_research_history(
     symbol: str | None = None,
     yahoo_symbol: str | None = None,
     data_provider: str | None = None,
+    markdown_report: str = "",
+    result_json: dict | None = None,
 ) -> dict:
     created_at = _now_iso()
     record = {
@@ -153,6 +171,8 @@ def save_research_history(
             citation_check.get("total_sources", 0),
         ),
         "summary": final_report.get("summary", ""),
+        "markdown_report": markdown_report,
+        "result_json": json.dumps(result_json, ensure_ascii=False, separators=(",", ":")) if result_json else "{}",
     }
 
     with _connect() as connection:
@@ -160,9 +180,10 @@ def save_research_history(
             """
             INSERT INTO research_history (
                 tenant_id, user_id, company_name, symbol, yahoo_symbol, data_provider,
-                thread_id, created_at, recommendation, confidence, sources_count, summary
+                thread_id, created_at, recommendation, confidence, sources_count, summary,
+                markdown_report, result_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["tenant_id"],
@@ -177,6 +198,8 @@ def save_research_history(
                 record["confidence"],
                 record["sources_count"],
                 record["summary"],
+                record["markdown_report"],
+                record["result_json"],
             ),
         )
         record["id"] = cursor.lastrowid
@@ -215,6 +238,40 @@ def get_research_history(
         rows = connection.execute(query, params).fetchall()
 
     return [_row_to_dict(row) for row in rows]
+
+
+def get_history_by_id(
+    history_id: int,
+    *,
+    tenant_id: str = DEFAULT_TENANT_ID,
+    user_id: str = DEFAULT_USER_ID,
+) -> dict | None:
+    """Return a single history record with full report data (markdown + result JSON).
+    返回单条历史记录，含完整报告正文与结构化结果 JSON。
+    """
+    with _connect() as connection:
+        row = connection.execute(
+            """
+            SELECT id, tenant_id, user_id, company_name, symbol, yahoo_symbol, data_provider,
+                   thread_id, created_at, recommendation, confidence, sources_count, summary,
+                   markdown_report, result_json
+            FROM research_history
+            WHERE id = ? AND tenant_id = ? AND user_id = ?
+            """,
+            (history_id, tenant_id, user_id),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    record = _row_to_dict(row)
+    # Parse result_json back into a dict for the caller.
+    # 将 result_json 反序列化为 dict 以便调用方直接使用。
+    try:
+        record["result"] = json.loads(record.get("result_json", "{}") or "{}")
+    except json.JSONDecodeError:
+        record["result"] = {}
+    return record
 
 
 def add_to_watchlist(

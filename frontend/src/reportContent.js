@@ -17,6 +17,44 @@ export function cleanMarkdownText(text) {
     .trim();
 }
 
+const HEADING_LABEL_MAP = {
+  "Executive Summary": "摘要",
+  "Sources": "信息来源",
+};
+
+export function extractReportHeadings(content) {
+  const reportText = normalizeReportMarkdown(content);
+  if (!reportText) return [];
+
+  const lines = reportText.split("\n");
+  const headings = [];
+  let sectionIndex = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const h1Match = trimmed.match(/^#\s+(.+)/);
+    const h2Match = trimmed.match(/^##+\s*(.+)/);
+
+    if (h1Match || h2Match) {
+      const rawText = (h1Match || h2Match)[1];
+      const displayText = cleanMarkdownText(rawText);
+      sectionIndex += 1;
+      const slug = String(displayText)
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}_]+/gu, "-")
+        .replace(/^-+|-+$/g, "") || "section";
+
+      headings.push({
+        level: h1Match ? 1 : 2,
+        text: HEADING_LABEL_MAP[displayText] || displayText,
+        sectionId: `report-section-${sectionIndex}-${slug}`,
+      });
+    }
+  }
+
+  return headings;
+}
+
 export function extractExecutiveSummary(content) {
   const reportText = normalizeReportMarkdown(content);
   if (!reportText) return [];

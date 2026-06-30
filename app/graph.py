@@ -1,8 +1,36 @@
-from typing import TypedDict
+from datetime import datetime, timezone
+from typing import Annotated, TypedDict
 from uuid import uuid4
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
+from langgraph.types import Send
+
+
+def _merge_dict(current: dict, update: dict) -> dict:
+    """Reducer: shallow-merge two dicts so parallel branches can contribute."""
+    if current is None:
+        return update or {}
+    if update is None:
+        return current or {}
+    return {**current, **update}
+
+
+def _merge_trace(current: dict, update: dict) -> dict:
+    """Reducer: concatenate trace step lists from parallel branches.
+
+    Preserves metadata (trace_id, started_at, etc.) from *current* while
+    letting *update* override single-value keys (finished_at, duration_seconds).
+    """
+    if current is None:
+        return update or {"steps": []}
+    if update is None:
+        return current or {"steps": []}
+    return {
+        **current,
+        **update,
+        "steps": current.get("steps", []) + update.get("steps", []),
+    }
 
 from app.agents import (
     bear_analyst,
@@ -26,29 +54,64 @@ from app.rag.retriever import retrieve_industry_context
 from app.report_generator import generate_markdown_report
 from app.services.analysis_context import build_analysis_context
 from app.services.citation_checker import check_citations
-from app.trace import add_trace_step, finish_trace, start_trace
+from app.trace import add_trace_step, start_trace
 from app.utils import safe_run_agent
 
 
 class DeepAlphaState(TypedDict):
     """Shared LangGraph state passed between research nodes.
-    LangGraph 各节点之间传递的共享状态，集中保存输入画像、Agent 输出、报告与追踪信息。
+
+    Keys annotated with _merge_dict / _merge_trace use custom reducers so
+    parallel Send-based branches can write to the same key without colliding.
     """
+
     thread_id: str
     company_name: str
     market_profile: dict
     financial_profile: dict
     research_plan: dict
-    context: dict
+    context: Annotated[dict, _merge_dict]
     rag_chunks: list[dict]
     rag_context: dict
     analysis_context: dict
-    team_results: dict
+    team_results: Annotated[dict, _merge_dict]
     final_report: dict
     markdown_report: str
     report_editor_result: dict
     citation_check: dict
-    trace: dict
+    trace: Annotated[dict, _merge_trace]
+
+
+# ── Parallel fan-out helpers ──────────────────────────────────────────
+
+
+def _gate(state: DeepAlphaState) -> DeepAlphaState:
+    """No-op synchronization gate. Returns empty dict — the framework
+    merges upstream state automatically; we just need the barrier."""
+    return {}
+
+
+def _fanout_analysts(state: DeepAlphaState) -> list[Send]:
+    """After RAG, run all independent analysts in parallel."""
+    return [
+        Send("industry", state),
+        Send("fundamental", state),
+        Send("financial", state),
+        Send("valuation", state),
+        Send("technical", state),
+        Send("news", state),
+        Send("sentiment", state),
+    ]
+
+
+def _fanout_debate(state: DeepAlphaState) -> list[Send]:
+    """After all analysts complete, run Bull and Bear in parallel."""
+    return [Send("bull", state), Send("bear", state)]
+
+
+def _fanout_review(state: DeepAlphaState) -> list[Send]:
+    """After debate completes, run Trader, Risk Manager, and Source Quality in parallel."""
+    return [Send("trader", state), Send("risk", state), Send("source_quality", state)]
 
 
 def _run_agent_node(
@@ -57,20 +120,24 @@ def _run_agent_node(
     agent_name: str,
     func,
 ) -> DeepAlphaState:
-    """Run a single analyst and merge its structured result back into state.
-    执行单个分析 Agent，并把结构化结果合并回全局状态。
-    """
-    context = state["context"]
-    team_results = dict(state["team_results"])
-    trace = state["trace"]
+    """Run a single analyst and merge its result back into state.
 
-    # Downstream agents see previous outputs, which lets bull/bear/risk roles debate accumulated evidence.
-    # 下游 Agent 可以读取前序结果，从而基于已积累证据继续辩论与审查。
-    context["agent_outputs"] = team_results
+    Copies context / team_results before mutation so that parallel
+    branches (driven by Send fan-out) do not share mutable references.
+
+    Returns only incremental trace steps — the _merge_trace reducer
+    concatenates them across parallel branches.
+    """
+    context = dict(state["context"])
+    team_results = dict(state["team_results"])
+
+    context["agent_outputs"] = dict(team_results)
     result = safe_run_agent(agent_name, func, state["company_name"], context)
     team_results[output_key] = result
-    context["agent_outputs"] = team_results
+    context["agent_outputs"] = dict(team_results)
 
+    # Start fresh — the reducer concatenates so we only emit the new step.
+    trace = {"steps": []}
     trace_status = "failed" if result.get("error") else "success"
     add_trace_step(
         trace,
@@ -79,12 +146,9 @@ def _run_agent_node(
         result.get("error", f"{result.get('agent', agent_name)} completed."),
     )
 
-    return {
-        **state,
-        "context": context,
-        "team_results": team_results,
-        "trace": trace,
-    }
+    # Return only modified keys so parallel fan-out doesn't create merge
+    # conflicts on immutable fields like thread_id / company_name.
+    return {"context": context, "team_results": team_results, "trace": trace}
 
 
 def planner_node(state: DeepAlphaState) -> DeepAlphaState:
@@ -113,11 +177,10 @@ def planner_node(state: DeepAlphaState) -> DeepAlphaState:
         "agent_outputs": {},
         "memory": {"recent_history": recent_history},
     }
-    trace = state["trace"]
+    trace = {"steps": []}
     add_trace_step(trace, "planner_completed", "success", "Research plan created.")
 
     return {
-        **state,
         "research_plan": research_plan,
         "context": context,
         "team_results": {},
@@ -164,7 +227,6 @@ def rag_node(state: DeepAlphaState) -> DeepAlphaState:
     rag_context = retrieve_industry_context(state["company_name"], query)
     rag_chunks = rag_context.get("chunks", [])
     context = state["context"]
-    trace = state["trace"]
     analysis_context = build_analysis_context(
         state["company_name"],
         market_profile=state.get("market_profile", {}),
@@ -174,20 +236,22 @@ def rag_node(state: DeepAlphaState) -> DeepAlphaState:
 
     context["rag"] = rag_context
     context["analysis_context"] = analysis_context
+
+    # Incremental trace step — reducer concatenates.
+    trace_update = {"steps": []}
     add_trace_step(
-        trace,
+        trace_update,
         "rag_retriever_completed",
         "success",
         f"Retrieved {len(rag_chunks)} RAG chunks.",
     )
 
     return {
-        **state,
         "context": context,
         "rag_chunks": rag_chunks,
         "rag_context": rag_context,
         "analysis_context": analysis_context,
-        "trace": trace,
+        "trace": trace_update,
     }
 
 
@@ -248,7 +312,7 @@ def committee_node(state: DeepAlphaState) -> DeepAlphaState:
         state["company_name"],
         state["context"],
     )
-    trace = state["trace"]
+    trace = {"steps": []}
     trace_status = "failed" if result.get("error") else "success"
     add_trace_step(
         trace,
@@ -257,7 +321,7 @@ def committee_node(state: DeepAlphaState) -> DeepAlphaState:
         result.get("error", "Final report created."),
     )
 
-    return {**state, "final_report": result, "trace": trace}
+    return {"final_report": result, "trace": trace}
 
 
 def report_node(state: DeepAlphaState) -> DeepAlphaState:
@@ -273,10 +337,10 @@ def report_node(state: DeepAlphaState) -> DeepAlphaState:
         state["context"].get("market_profile", {}),
         state["context"].get("financial_profile", {}),
     )
-    trace = state["trace"]
+    trace = {"steps": []}
     add_trace_step(trace, "report_generated", "success", "Markdown report generated.")
 
-    return {**state, "markdown_report": markdown_report, "trace": trace}
+    return {"markdown_report": markdown_report, "trace": trace}
 
 
 def report_editor_node(state: DeepAlphaState) -> DeepAlphaState:
@@ -290,7 +354,7 @@ def report_editor_node(state: DeepAlphaState) -> DeepAlphaState:
         state["markdown_report"],
     )
     edited_report = result.get("markdown_report", state["markdown_report"])
-    trace = state["trace"]
+    trace = {"steps": []}
     trace_status = "failed" if result.get("error") else "success"
     edits = result.get("edits", {})
     add_trace_step(
@@ -308,7 +372,6 @@ def report_editor_node(state: DeepAlphaState) -> DeepAlphaState:
     )
 
     return {
-        **state,
         "markdown_report": edited_report,
         "report_editor_result": result,
         "trace": trace,
@@ -323,27 +386,54 @@ def citation_node(state: DeepAlphaState) -> DeepAlphaState:
         state["team_results"],
         state["rag_chunks"],
     )
-    trace = state["trace"]
+    # Emit the final trace update: incremental step + finish metadata.
+    # The _merge_trace reducer preserves started_at / trace_id from current
+    # and overlays finished_at / duration_seconds from this update.
+    now = datetime.now(timezone.utc)
+    finished_at = now.isoformat()
+    current_trace = state["trace"]
+    started_at = datetime.fromisoformat(current_trace["started_at"])
+    duration_seconds = round((now - started_at).total_seconds(), 4)
+
+    trace = {
+        "steps": [],
+        "finished_at": finished_at,
+        "duration_seconds": duration_seconds,
+    }
     add_trace_step(trace, "citation_checked", "success", "Citation check completed.")
 
-    return {**state, "citation_check": citation_check, "trace": finish_trace(trace)}
+    return {"citation_check": citation_check, "trace": trace}
 
 
 def _build_graph():
-    """Compile the deterministic research workflow.
-    编译固定顺序的投研工作流，保证每次报告都经过同一套审查链路。
+    """Compile the hybrid-parallel research workflow.
+
+    Three parallel groups separated by sync gates:
+    1. Industry / Fundamental / Financial / Valuation / Technical / News / Sentiment
+    2. Bull / Bear (parallel debate)
+    3. Trader / Risk / SourceQuality (parallel review)
+
+    Planner → RAG (sequential head) and Committee → Report → Editor → Citation
+    (sequential tail) remain serial because they depend on full accumulated context.
     """
     graph = StateGraph(DeepAlphaState)
 
+    # ── All agent nodes ─────────────────────────────────────────────
     graph.add_node("planner", planner_node)
     graph.add_node("rag", rag_node)
-    graph.add_node("industry", industry_node)
-    graph.add_node("fundamental", fundamental_node)
-    graph.add_node("financial", financial_node)
-    graph.add_node("valuation", valuation_node)
-    graph.add_node("technical", technical_node)
-    graph.add_node("news", news_node)
-    graph.add_node("sentiment", sentiment_node)
+
+    ANALYST_NODES = {
+        "industry": industry_node,
+        "fundamental": fundamental_node,
+        "financial": financial_node,
+        "valuation": valuation_node,
+        "technical": technical_node,
+        "news": news_node,
+        "sentiment": sentiment_node,
+    }
+    for name, func in ANALYST_NODES.items():
+        graph.add_node(name, func)
+
     graph.add_node("bull", bull_node)
     graph.add_node("bear", bear_node)
     graph.add_node("trader", trader_node)
@@ -354,21 +444,37 @@ def _build_graph():
     graph.add_node("report_editor", report_editor_node)
     graph.add_node("citation", citation_node)
 
+    # ── Synchronization gates ───────────────────────────────────────
+    graph.add_node("_debate_gate", _gate)
+    graph.add_node("_review_gate", _gate)
+
+    # ── Sequential head ─────────────────────────────────────────────
     graph.set_entry_point("planner")
     graph.add_edge("planner", "rag")
-    graph.add_edge("rag", "industry")
-    graph.add_edge("industry", "fundamental")
-    graph.add_edge("fundamental", "financial")
-    graph.add_edge("financial", "valuation")
-    graph.add_edge("valuation", "technical")
-    graph.add_edge("technical", "news")
-    graph.add_edge("news", "sentiment")
-    graph.add_edge("sentiment", "bull")
-    graph.add_edge("bull", "bear")
-    graph.add_edge("bear", "trader")
-    graph.add_edge("trader", "risk")
-    graph.add_edge("risk", "source_quality")
-    graph.add_edge("source_quality", "committee")
+
+    # ── Group 1: RAG → 7 analysts (parallel) ────────────────────────
+    graph.add_conditional_edges(
+        "rag", _fanout_analysts, {n: n for n in ANALYST_NODES}
+    )
+    for name in ANALYST_NODES:
+        graph.add_edge(name, "_debate_gate")
+
+    # ── Group 2: Debate gate → Bull + Bear (parallel) ──────────────
+    graph.add_conditional_edges(
+        "_debate_gate", _fanout_debate, {"bull": "bull", "bear": "bear"}
+    )
+    graph.add_edge("bull", "_review_gate")
+    graph.add_edge("bear", "_review_gate")
+
+    # ── Group 3: Review gate → Trader + Risk + SourceQuality (parallel)
+    REVIEW_NODES = {"trader": "trader", "risk": "risk", "source_quality": "source_quality"}
+    graph.add_conditional_edges(
+        "_review_gate", _fanout_review, REVIEW_NODES
+    )
+    for name in REVIEW_NODES:
+        graph.add_edge(name, "committee")
+
+    # ── Sequential tail ─────────────────────────────────────────────
     graph.add_edge("committee", "report")
     graph.add_edge("report", "report_editor")
     graph.add_edge("report_editor", "citation")
@@ -427,7 +533,16 @@ def run_deepalpha_graph(
                 continue
             for node_name, state_update in chunk.items():
                 if isinstance(state_update, dict):
-                    final_state = state_update
+                    # Apply custom reducers for annotated keys so parallel
+                    # Send branches accumulate correctly (trace → concat,
+                    # context/team_results → shallow merge).
+                    for key, value in state_update.items():
+                        if key == "trace":
+                            final_state[key] = _merge_trace(final_state.get(key), value)
+                        elif key in ("context", "team_results"):
+                            final_state[key] = _merge_dict(final_state.get(key), value)
+                        else:
+                            final_state[key] = value
                 if node_name == "rag":
                     progress_callback("rag_search", "finish", "RAG context ready.")
                     progress_callback("agent_analysis", "start", "Running analyst agents.")

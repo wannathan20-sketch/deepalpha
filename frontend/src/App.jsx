@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { API_BASE, formatApiErrorMessage } from "./apiClient.js";
 import { deleteReportChatMessage, getReportChatItemKey } from "./reportChatHistory.js";
-import { cleanMarkdownText, extractExecutiveSummary } from "./reportContent.js";
+import { cleanMarkdownText, extractExecutiveSummary, extractReportHeadings } from "./reportContent.js";
 import { loadStockIndex, mergeSymbolCandidates, parseWatchlistImportText, searchStockIndex } from "./stockSearch.js";
 
 const DISCLAIMER_STORAGE_KEY = "deepalpha_disclaimer_accepted";
@@ -388,7 +388,7 @@ const REPORT_STEP_LABELS = {
 
 function ReportTaskProgress({ task }) {
   const steps = task?.steps || [];
-  if (!task && !steps.length) return null;
+  if (!steps.length) return null;
 
   return (
     <div className="mt-3 rounded-md border border-slate-800 bg-slate-950/70 p-3">
@@ -575,6 +575,117 @@ function ReportEditorSummary({ editor }) {
   );
 }
 
+function CitationCheckSummary({ citationCheck }) {
+  if (!citationCheck) return null;
+
+  const coverage = citationCheck.claim_citation_coverage || 0;
+  const semanticCov = citationCheck.semantic_coverage || 0;
+  const unverifiedClaims = citationCheck.unverified_claims || [];
+  const warnings = citationCheck.warnings || [];
+  const issues = citationCheck.issues || [];
+
+  const coveragePct = Math.round(coverage * 100);
+  const semanticPct = Math.round(semanticCov * 100);
+  const passed = citationCheck.passed !== false && issues.length === 0;
+
+  const coverageTone = coveragePct >= 60 ? "emerald" : coveragePct >= 30 ? "amber" : "red";
+  const semanticTone = semanticPct >= 60 ? "emerald" : semanticPct >= 30 ? "amber" : "red";
+
+  return (
+    <div className="rounded-md border border-slate-800 bg-slate-950/70 p-3">
+      <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase text-slate-300">
+        <CheckCircle2 className="h-3.5 w-3.5 text-cyan-300" />
+        引用验证
+        <span className={classNames("ml-auto rounded px-1.5 py-0.5 text-[10px]", passed ? "bg-emerald-400/10 text-emerald-200" : "bg-amber-400/10 text-amber-200")}>
+          {passed ? "通过" : "注意"}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <CompactMetric label="URL 覆盖率" value={`${coveragePct}%`} tone={coverageTone} />
+        <CompactMetric label="语义匹配" value={`${semanticPct}%`} tone={semanticTone} />
+      </div>
+      {unverifiedClaims.length > 0 && (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-xs text-amber-100 hover:text-amber-50 select-none">
+            {unverifiedClaims.length} 条声明缺少 RAG 验证
+          </summary>
+          <div className="mt-2 max-h-48 space-y-1.5 overflow-auto">
+            {unverifiedClaims.slice(0, 10).map((item, idx) => (
+              <div className="rounded border border-amber-400/20 bg-amber-400/5 px-2 py-1.5 text-[11px] leading-4 text-amber-100/80" key={idx}>
+                <span className="font-medium text-amber-100">{item.agent}</span>
+                {item.has_source_url && <span className="ml-1 text-slate-500">(有 URL)</span>}
+                <span className="mt-0.5 block">{item.claim}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+      {warnings.length > 0 && !unverifiedClaims.length && (
+        <p className="mt-2 text-xs leading-5 text-slate-400">{warnings[0]}</p>
+      )}
+    </div>
+  );
+}
+
+function DataQualityBar({ analysisContext }) {
+  const dq = analysisContext?.data_quality;
+  if (!dq || dq.overall_score == null) return null;
+
+  const score = dq.overall_score;
+  const levelLabel = { good: "优质", usable: "可用", limited: "有限", poor: "不足" }[dq.level] || dq.level;
+  const barColor =
+    score >= 85 ? "bg-emerald-400" : score >= 60 ? "bg-cyan-400" : score >= 35 ? "bg-amber-400" : "bg-red-400";
+  const textColor =
+    score >= 85 ? "text-emerald-200" : score >= 60 ? "text-cyan-200" : score >= 35 ? "text-amber-200" : "text-red-200";
+
+  const sources = [
+    { key: "market", label: "行情" },
+    { key: "financials", label: "财报" },
+    { key: "rag", label: "RAG" },
+  ];
+
+  return (
+    <div className="rounded-md border border-slate-800 bg-slate-950/70 p-3">
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 shrink-0">
+          <Database className="h-3.5 w-3.5 text-cyan-300" />
+          <span className="text-xs font-semibold uppercase text-slate-300">数据质量</span>
+        </div>
+        <div className="flex-1 h-2 rounded-full bg-slate-800 overflow-hidden">
+          <div
+            className={classNames("h-full rounded-full transition-all", barColor)}
+            style={{ width: `${Math.max(score, 4)}%` }}
+          />
+        </div>
+        <span className={classNames("text-sm font-bold tabular-nums", textColor)}>{score}</span>
+        <span className={classNames("text-[11px] rounded px-1.5 py-0.5", score >= 85 ? "bg-emerald-400/10 text-emerald-200" : score >= 60 ? "bg-cyan-400/10 text-cyan-200" : score >= 35 ? "bg-amber-400/10 text-amber-200" : "bg-red-400/10 text-red-200")}>
+          {levelLabel}
+        </span>
+      </div>
+      <div className="mt-2 flex gap-3 text-[11px] text-slate-500">
+        {sources.map(({ key, label }) => {
+          const item = analysisContext[key];
+          const status = item?.status || "unknown";
+          const dotColor =
+            status === "available" ? "bg-emerald-400" :
+            status === "partial" || status === "estimated" ? "bg-cyan-400" :
+            status === "stale" || status === "fallback" ? "bg-amber-400" :
+            "bg-red-400";
+          return (
+            <span className="flex items-center gap-1" key={key}>
+              <span className={classNames("h-1.5 w-1.5 rounded-full", dotColor)} />
+              {label}
+            </span>
+          );
+        })}
+        {dq.limitations?.length > 0 && (
+          <span className="text-amber-400/70 truncate">{dq.limitations[0]}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ExecutiveSummaryCard({ content }) {
   const items = extractExecutiveSummary(content);
   if (!items.length) return null;
@@ -583,7 +694,7 @@ function ExecutiveSummaryCard({ content }) {
     <div className="rounded-md border border-cyan-400/25 bg-cyan-400/10 p-3">
       <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-cyan-100">
         <FileText className="h-3.5 w-3.5" />
-        Executive Summary
+        摘要
       </div>
       <div className="space-y-2">
         {items.map((item) => (
@@ -646,6 +757,35 @@ function reportSectionId(index, title) {
     .replace(/[^\p{L}\p{N}_]+/gu, "-")
     .replace(/^-+|-+$/g, "") || "section";
   return `report-section-${index}-${slug}`;
+}
+
+function ReportTOC({ content, onJump }) {
+  const headings = useMemo(() => extractReportHeadings(content), [content]);
+  if (!headings.length) return null;
+
+  return (
+    <details className="rounded-md border border-slate-800 bg-slate-950/70" open>
+      <summary className="cursor-pointer px-4 py-2.5 text-xs font-semibold uppercase text-slate-400 hover:text-slate-200 select-none">
+        报告目录 · {headings.length} 个章节
+      </summary>
+      <div className="border-t border-slate-800 px-3 py-2 max-h-[360px] overflow-auto">
+        {headings.map((heading) => (
+          <button
+            className={classNames(
+              "block w-full rounded px-2 py-1.5 text-left text-xs transition hover:bg-cyan-400/10 hover:text-cyan-100",
+              heading.level === 1 ? "font-semibold text-slate-200" : "pl-6 text-slate-400",
+            )}
+            key={heading.sectionId}
+            onClick={() => onJump(heading.sectionId)}
+            type="button"
+          >
+            {heading.level === 1 ? "" : ""}
+            {heading.text}
+          </button>
+        ))}
+      </div>
+    </details>
+  );
 }
 
 function MarkdownReport({ content, printMode = false, highlightedSectionId = "" }) {
@@ -1099,7 +1239,7 @@ function TechDocs({ architecture, backendOnline, onBack }) {
           <DeepAlphaLogo />
           <div>
             <h1 className="text-2xl font-bold">技术说明</h1>
-            <p className="text-sm text-slate-400">DeepAlpha 架构、RAG、Memory、Trace 与调试信息</p>
+            <p className="text-sm text-slate-400">DeepAlpha 架构、Agent 工作流、RAG、Memory、Trace 与调试信息</p>
           </div>
         </div>
         <button
@@ -1143,18 +1283,89 @@ function TechDocs({ architecture, backendOnline, onBack }) {
           </Panel>
 
           <Panel title="Agent 工作流" icon={Brain}>
-            <div className="grid gap-3 md:grid-cols-2">
-              {[
-                ["Planner", "制定公司研究计划与分析路径。"],
-                ["RAG Retriever", "检索行业资料并写入上下文。"],
-                ["Analysts", "基本面、技术面、新闻、情绪与多空观点分析。"],
-                ["Committee", "汇总风险审查与最终投研结论。"],
-              ].map(([title, text]) => (
-                <div className="rounded-md border border-slate-800 bg-slate-950/70 p-3" key={title}>
-                  <h2 className="font-semibold text-cyan-200">{title}</h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">{text}</p>
+            <div className="space-y-4">
+              <div className="rounded-md border border-slate-800 bg-slate-950/70 p-3">
+                <div className="mb-2 text-xs font-semibold uppercase text-cyan-200">串行头部</div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {[
+                    ["Planner", "分析市场与财报，制定研究计划。"],
+                    ["RAG Retriever", "检索行业上下文、竞品与监管背景。"],
+                  ].map(([title, text]) => (
+                    <div className="rounded border border-slate-800 bg-slate-900/60 p-2" key={title}>
+                      <span className="text-xs font-semibold text-slate-200">{title}</span>
+                      <p className="mt-1 text-[11px] leading-5 text-slate-500">{text}</p>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
+
+              <div className="rounded-md border border-cyan-400/20 bg-cyan-400/5 p-3">
+                <div className="mb-2 text-xs font-semibold uppercase text-cyan-200">并行组 1 · 7 位分析师</div>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {[
+                    ["Industry", "行业格局"],
+                    ["Fundamental", "商业模式"],
+                    ["Financial", "财报分析"],
+                    ["Valuation", "估值情景"],
+                    ["Technical", "技术面"],
+                    ["News", "新闻事件"],
+                    ["Sentiment", "市场情绪"],
+                  ].map(([name, desc]) => (
+                    <div className="rounded border border-slate-800 bg-slate-900/60 p-2" key={name}>
+                      <span className="text-xs font-semibold text-slate-200">{name}</span>
+                      <p className="mt-0.5 text-[11px] text-slate-500">{desc}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-md border border-amber-400/20 bg-amber-400/5 p-3">
+                <div className="mb-2 text-xs font-semibold uppercase text-amber-200">并行组 2 · 多空辩论</div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {[
+                    ["Bull Analyst", "归纳看多论点与证据。"],
+                    ["Bear Analyst", "归纳看空论点与风险。"],
+                  ].map(([title, text]) => (
+                    <div className="rounded border border-slate-800 bg-slate-900/60 p-2" key={title}>
+                      <span className="text-xs font-semibold text-slate-200">{title}</span>
+                      <p className="mt-1 text-[11px] leading-5 text-slate-500">{text}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-md border border-violet-400/20 bg-violet-400/5 p-3">
+                <div className="mb-2 text-xs font-semibold uppercase text-violet-200">并行组 3 · 审查校验</div>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {[
+                    ["Trader", "交易假设"],
+                    ["Risk Manager", "风控审查"],
+                    ["Source Quality", "来源质量评级"],
+                  ].map(([title, text]) => (
+                    <div className="rounded border border-slate-800 bg-slate-900/60 p-2" key={title}>
+                      <span className="text-xs font-semibold text-slate-200">{title}</span>
+                      <p className="mt-1 text-[11px] leading-5 text-slate-500">{text}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-md border border-slate-800 bg-slate-950/70 p-3">
+                <div className="mb-2 text-xs font-semibold uppercase text-slate-300">串行尾部</div>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {[
+                    ["Committee", "综合决策"],
+                    ["Report", "Markdown 渲染"],
+                    ["Editor", "清理润色"],
+                    ["Citation Check", "引用验证"],
+                  ].map(([title, text]) => (
+                    <div className="rounded border border-slate-800 bg-slate-900/60 p-2" key={title}>
+                      <span className="text-xs font-semibold text-slate-200">{title}</span>
+                      <p className="mt-1 text-[11px] leading-5 text-slate-500">{text}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </Panel>
         </section>
@@ -1174,7 +1385,6 @@ export default function App() {
   const [architecture, setArchitecture] = useState(null);
   const [watchlist, setWatchlist] = useState([]);
   const [history, setHistory] = useState([]);
-  const [selectedHistoryIndex, setSelectedHistoryIndex] = useState(0);
   const [reportResult, setReportResult] = useState(null);
   const [backendOnline, setBackendOnline] = useState(false);
   const [loading, setLoading] = useState("");
@@ -1249,7 +1459,6 @@ export default function App() {
       setWatchlist(watchlistData);
       setHistory(historyData);
       setMarketReview(marketReviewData);
-      setSelectedHistoryIndex(0);
     } catch (err) {
       setBackendOnline(false);
       setError("无法连接 FastAPI 后端，请先启动：uvicorn app.main:app --reload");
@@ -1261,6 +1470,32 @@ export default function App() {
       setArchitecture(architectureData);
     } catch (err) {
       setArchitecture(null);
+    }
+  }
+
+  async function loadHistoryDetail(record) {
+    setError("");
+    setLoading("history");
+    try {
+      const detail = await requestJson(`/memory/history/detail/${record.id}`);
+      // The detail.result contains the full _build_report_response payload
+      // (final_report, markdown_report, analysis_context, source_quality, etc.)
+      const reportPayload = detail.result || {};
+      setReportResult({
+        ...reportPayload,
+        // Ensure markdown_report is always set from either source.
+        markdown_report: reportPayload.markdown_report || detail.markdown_report || "",
+        company_name: detail.company_name,
+      });
+      // Synthetic task so the right panel renders the report view.
+      setReportTask({ status: "success", task_id: null, steps: [] });
+      setReportChatHistory([]);
+      setReportChatError("");
+      setHighlightedReportSection("");
+    } catch (err) {
+      setError("加载历史报告失败，请确认后端已启动。");
+    } finally {
+      setLoading("");
     }
   }
 
@@ -1279,7 +1514,7 @@ export default function App() {
     if (!reportResult?.markdown_report) return;
 
     const originalTitle = document.title;
-    const reportName = selectedCompanyName || companyName.trim() || "DeepAlpha";
+    const reportName = reportResult.company_name || selectedCompanyName || companyName.trim() || "DeepAlpha";
     document.title = `DeepAlpha-${reportName}-投研报告`;
     window.print();
     window.setTimeout(() => {
@@ -1640,7 +1875,6 @@ export default function App() {
     }
   }
 
-  const selectedHistory = history[selectedHistoryIndex];
   const matchedSymbol = remoteSymbol;
   const needsConfirmation = Boolean(symbolCandidates.length > 1 && !matchedSymbol);
   const yahooSymbol = toYahooSymbol(ticker, matchedSymbol);
@@ -1731,7 +1965,7 @@ export default function App() {
         </div>
       )}
 
-      <main className="grid gap-4 xl:grid-cols-[280px_minmax(460px,1fr)_380px]">
+      <main className="grid gap-4 xl:grid-cols-[280px_minmax(420px,1fr)_480px]">
         <aside className="space-y-4">
           <Panel title="推荐" icon={Star}>
             <div className="space-y-2">
@@ -1976,7 +2210,7 @@ export default function App() {
         <aside className="space-y-4">
           <Panel title="投研报告生成" icon={FileText}>
             <ReportTaskProgress task={reportTask} />
-            {reportResult ? (
+            {reportResult?.markdown_report ? (
               <div className="mt-4 space-y-4">
                 <div className="grid grid-cols-3 gap-2">
                   <MetricCard label="Decision" value={reportResult.final_report?.recommendation} icon={TrendingUp} />
@@ -1984,9 +2218,24 @@ export default function App() {
                   <MetricCard label="Sources" value={reportResult.final_report?.sources_count} icon={Database} />
                 </div>
                 <ExecutiveSummaryCard content={reportResult.markdown_report} />
+                <DataQualityBar analysisContext={reportResult.analysis_context} />
                 <div className="grid gap-3 lg:grid-cols-2">
                   <SourceQualitySummary sourceQuality={reportResult.source_quality} />
+                  <CitationCheckSummary citationCheck={reportResult.citation_check} />
                   <ReportEditorSummary editor={reportResult.report_editor} />
+                  {reportResult.trace_summary?.duration_seconds != null && (
+                    <div className="rounded-md border border-slate-800 bg-slate-950/70 p-3">
+                      <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-slate-300">
+                        <Clock3 className="h-3.5 w-3.5 text-cyan-300" />
+                        执行追踪
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <CompactMetric label="耗时" value={`${Math.round(reportResult.trace_summary.duration_seconds)}s`} tone="slate" />
+                        <CompactMetric label="步数" value={reportResult.trace_summary.steps_count} tone="slate" />
+                        <CompactMetric label="ID" value={reportResult.trace_summary.trace_id?.slice(0, 8) || "N/A"} tone="slate" />
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="rounded-md border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
                   本报告为研究辅助输出，不构成投资建议。请结合交易所公告、公司财报与专业判断复核。
@@ -1999,7 +2248,8 @@ export default function App() {
                   <Download className="h-4 w-4" />
                   导出报告 PDF
                 </button>
-                <div className="max-h-[520px] overflow-auto rounded-md border border-slate-800 bg-slate-950 p-4 text-sm leading-6 text-slate-300">
+                <ReportTOC content={reportResult.markdown_report} onJump={jumpToReportCitation} />
+                <div className="max-h-[640px] overflow-auto rounded-md border border-slate-800 bg-slate-950 p-4 text-sm leading-6 text-slate-300">
                   <MarkdownReport content={reportResult.markdown_report} highlightedSectionId={highlightedReportSection} />
                 </div>
                 <div className="space-y-3 rounded-md border border-cyan-400/20 bg-slate-950/80 p-4">
@@ -2017,7 +2267,7 @@ export default function App() {
                       </button>
                     )}
                   </div>
-                  <div className="flex flex-col gap-2 sm:flex-row">
+                  <div className="grid grid-cols-2 gap-2">
                     <select
                       className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-400"
                       value={reportStrategy}
@@ -2040,120 +2290,141 @@ export default function App() {
                       <option value="report_only">仅报告</option>
                       <option value="web">联网补充</option>
                     </select>
-                    <textarea
-                      className="min-h-20 flex-1 resize-y rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-cyan-400"
-                      value={reportQuestion}
-                      onChange={(event) => setReportQuestion(event.target.value)}
-                      placeholder="例如：这份报告里最需要持续验证的风险是什么？"
-                      disabled={reportChatLoading}
-                    />
-                    <button
-                      className="inline-flex items-center justify-center gap-2 rounded-md bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
-                      onClick={askReportQuestion}
-                      type="button"
-                      disabled={reportChatLoading}
-                    >
-                      {reportChatLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                      {reportChatLoading ? "分析中" : "提问"}
-                    </button>
                   </div>
+                  <textarea
+                    className="w-full resize-y rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-cyan-400"
+                    rows={3}
+                    value={reportQuestion}
+                    onChange={(event) => setReportQuestion(event.target.value)}
+                    placeholder="例如：这份报告里最需要持续验证的风险是什么？"
+                    disabled={reportChatLoading}
+                  />
+                  <button
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={askReportQuestion}
+                    type="button"
+                    disabled={reportChatLoading}
+                  >
+                    {reportChatLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    {reportChatLoading ? "分析中" : "提问"}
+                  </button>
                   {reportChatError && (
                     <div className="rounded-md border border-red-400/25 bg-red-400/10 px-3 py-2 text-sm text-red-100">
                       {reportChatError}
                     </div>
                   )}
                   {reportChatHistory.length > 0 && (
-                    <div className="space-y-3">
-                      {reportChatHistory.map((item) => {
+                    <div className="space-y-4">
+                      {reportChatHistory.map((item, idx) => {
                         const itemKey = item.message_id || item.id || `${item.created_at}-${item.question}`;
+                        const hasExtras = (item.key_points?.length || 0) + (item.risks?.length || 0) + (item.cited_sources?.length || 0) + (item.report_citations?.length || 0) + (item.web_citations?.length || 0) > 0;
                         return (
-                        <article className="rounded-md border border-slate-800 bg-slate-900/80 p-3" key={itemKey}>
-                          <div className="flex flex-wrap items-center gap-2 text-xs uppercase text-cyan-300">
-                            <span>{item.strategy}</span>
-                            <span className="rounded bg-slate-800 px-2 py-0.5 text-slate-400">{item.search_mode || item.route?.mode}</span>
+                        <article className={classNames("rounded-md border border-slate-800 bg-slate-900/80 p-4", idx > 0 && "border-t border-slate-700/50 pt-4")} key={itemKey}>
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+                            <span className="font-semibold uppercase text-cyan-300">{item.strategy}</span>
+                            <span className="text-slate-500">·</span>
+                            <span>{item.search_mode || item.route?.mode}</span>
                             {item.route?.web_status && item.route.web_status !== "not_requested" && (
-                              <span className={item.route.web_status === "success" ? "text-emerald-300" : "text-amber-300"}>
-                                Web: {item.route.web_status}
-                              </span>
+                              <>
+                                <span className="text-slate-500">·</span>
+                                <span className={item.route.web_status === "success" ? "text-emerald-300" : "text-amber-300"}>
+                                  Web: {item.route.web_status}
+                                </span>
+                              </>
+                            )}
+                            {(item.freshness?.report_generated_at || item.freshness?.web_retrieved_at) && (
+                              <>
+                                <span className="text-slate-500">·</span>
+                                <span>{item.freshness?.report_generated_at || item.freshness?.web_retrieved_at}</span>
+                              </>
                             )}
                           </div>
-                          <div className="mt-1 text-sm font-semibold text-slate-100">问：{item.question}</div>
+                          <div className="mt-2 text-sm font-semibold text-slate-100">问：{item.question}</div>
                           <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-300">{item.answer}</p>
-                          {item.key_points?.length > 0 && (
-                            <div className="mt-3">
-                              <div className="text-xs font-semibold text-slate-400">关键要点</div>
-                              <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-slate-300">
-                                {item.key_points.map((point, index) => <li key={`${itemKey}-point-${index}`}>{point}</li>)}
-                              </ul>
-                            </div>
-                          )}
-                          {item.risks?.length > 0 && (
-                            <div className="mt-3">
-                              <div className="text-xs font-semibold text-amber-300">风险</div>
-                              <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-amber-100">
-                                {item.risks.map((risk, index) => <li key={`${itemKey}-risk-${index}`}>{risk}</li>)}
-                              </ul>
-                            </div>
-                          )}
-                          {item.cited_sources?.length > 0 && (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {item.cited_sources.map((source) => (
-                                <a
-                                  className="rounded-md border border-cyan-300/30 px-2 py-1 text-xs text-cyan-100 hover:border-cyan-300"
-                                  href={safeReportUrl(source.url)}
-                                  key={`${itemKey}-${source.url}`}
-                                  rel="noreferrer"
-                                  target="_blank"
-                                >
-                                  {source.title || source.url}
-                                </a>
-                              ))}
-                            </div>
-                          )}
-                          {item.report_citations?.length > 0 && (
-                            <div className="mt-3 space-y-2">
-                              <div className="text-xs font-semibold text-cyan-300">报告证据</div>
-                              {item.report_citations.map((citation, index) => (
-                                <button
-                                  className="block w-full rounded-md border border-cyan-300/20 bg-cyan-400/5 p-2 text-left text-xs leading-5 text-slate-300 hover:border-cyan-300/50"
-                                  key={`${itemKey}-report-citation-${index}`}
-                                  onClick={() => jumpToReportCitation(citation.section_id)}
-                                  type="button"
-                                >
-                                  <span className="font-semibold text-cyan-100">{citation.section_title}</span>
-                                  <span className="mt-1 block">“{citation.excerpt}”</span>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                          {item.web_citations?.length > 0 && (
-                            <div className="mt-3 space-y-2">
-                              <div className="text-xs font-semibold text-violet-300">联网新增证据</div>
-                              {item.web_citations.map((citation) => (
-                                <a
-                                  className="block rounded-md border border-violet-300/20 bg-violet-400/5 p-2 text-xs leading-5 text-slate-300 hover:border-violet-300/50"
-                                  href={safeReportUrl(citation.url)}
-                                  key={`${itemKey}-${citation.url}`}
-                                  rel="noreferrer"
-                                  target="_blank"
-                                >
-                                  <span className="font-semibold text-violet-100">{citation.title}</span>
-                                  {citation.published_at && <span className="ml-2 text-slate-500">{citation.published_at}</span>}
-                                  {citation.snippet && <span className="mt-1 block">{citation.snippet}</span>}
-                                </a>
-                              ))}
-                            </div>
-                          )}
-                          {(item.freshness?.report_generated_at || item.freshness?.web_retrieved_at) && (
-                            <div className="mt-3 text-[11px] leading-5 text-slate-500">
-                              报告时间：{item.freshness?.report_generated_at || "未知"}
-                              {item.freshness?.web_retrieved_at ? ` · 联网检索：${item.freshness.web_retrieved_at}` : ""}
-                            </div>
-                          )}
                           {item.data_quality_warning && (
                             <div className="mt-3 rounded-md border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
                               {item.data_quality_warning}
                             </div>
+                          )}
+                          {hasExtras && (
+                            <details className="mt-3 group">
+                              <summary className="cursor-pointer text-xs text-slate-500 hover:text-slate-300 select-none">
+                                展开详情 · {[
+                                  item.key_points?.length && `${item.key_points.length} 要点`,
+                                  item.risks?.length && `${item.risks.length} 风险`,
+                                  item.cited_sources?.length && `${item.cited_sources.length} 来源`,
+                                  item.report_citations?.length && `${item.report_citations.length} 证据`,
+                                  item.web_citations?.length && `${item.web_citations.length} 联网`,
+                                ].filter(Boolean).join(" · ")}
+                              </summary>
+                              <div className="mt-3 space-y-3">
+                                {item.key_points?.length > 0 && (
+                                  <div>
+                                    <div className="text-xs font-semibold text-slate-400">关键要点</div>
+                                    <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-slate-300">
+                                      {item.key_points.map((point, index) => <li key={`${itemKey}-point-${index}`}>{point}</li>)}
+                                    </ul>
+                                  </div>
+                                )}
+                                {item.risks?.length > 0 && (
+                                  <div>
+                                    <div className="text-xs font-semibold text-amber-300">风险</div>
+                                    <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-amber-100">
+                                      {item.risks.map((risk, index) => <li key={`${itemKey}-risk-${index}`}>{risk}</li>)}
+                                    </ul>
+                                  </div>
+                                )}
+                                {item.cited_sources?.length > 0 && (
+                                  <div className="flex flex-wrap gap-2">
+                                    {item.cited_sources.map((source) => (
+                                      <a
+                                        className="rounded-md border border-cyan-300/30 px-2 py-1 text-xs text-cyan-100 hover:border-cyan-300"
+                                        href={safeReportUrl(source.url)}
+                                        key={`${itemKey}-${source.url}`}
+                                        rel="noreferrer"
+                                        target="_blank"
+                                      >
+                                        {source.title || source.url}
+                                      </a>
+                                    ))}
+                                  </div>
+                                )}
+                                {item.report_citations?.length > 0 && (
+                                  <div className="space-y-2">
+                                    <div className="text-xs font-semibold text-cyan-300">报告证据</div>
+                                    {item.report_citations.map((citation, index) => (
+                                      <button
+                                        className="block w-full rounded-md border border-cyan-300/20 bg-cyan-400/5 p-2 text-left text-xs leading-5 text-slate-300 hover:border-cyan-300/50"
+                                        key={`${itemKey}-report-citation-${index}`}
+                                        onClick={() => jumpToReportCitation(citation.section_id)}
+                                        type="button"
+                                      >
+                                        <span className="font-semibold text-cyan-100">{citation.section_title}</span>
+                                        <span className="mt-1 block">"{citation.excerpt}"</span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                                {item.web_citations?.length > 0 && (
+                                  <div className="space-y-2">
+                                    <div className="text-xs font-semibold text-violet-300">联网新增证据</div>
+                                    {item.web_citations.map((citation) => (
+                                      <a
+                                        className="block rounded-md border border-violet-300/20 bg-violet-400/5 p-2 text-xs leading-5 text-slate-300 hover:border-violet-300/50"
+                                        href={safeReportUrl(citation.url)}
+                                        key={`${itemKey}-${citation.url}`}
+                                        rel="noreferrer"
+                                        target="_blank"
+                                      >
+                                        <span className="font-semibold text-violet-100">{citation.title}</span>
+                                        {citation.published_at && <span className="ml-2 text-slate-500">{citation.published_at}</span>}
+                                        {citation.snippet && <span className="mt-1 block">{citation.snippet}</span>}
+                                      </a>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </details>
                           )}
                         </article>
                         );
@@ -2162,43 +2433,54 @@ export default function App() {
                   )}
                 </div>
               </div>
+            ) : reportResult ? (
+              <div className="rounded-md border border-amber-400/25 bg-amber-400/10 p-3 text-sm leading-6 text-amber-100">
+                该历史记录生成于较早版本，不含完整报告数据。请重新生成报告以查看详情与追问。
+              </div>
             ) : (
-              <p className="text-sm text-slate-500">点击“生成投研报告”后，报告会在这里生成。</p>
+              <p className="text-sm text-slate-500">点击"生成投研报告"后，报告会在这里生成。</p>
             )}
           </Panel>
 
           <Panel title="历史报告记录" icon={History}>
             {history.length ? (
-              <div className="space-y-3">
-                <select
-                  className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
-                  value={selectedHistoryIndex}
-                  onChange={(event) => setSelectedHistoryIndex(Number(event.target.value))}
-                >
-                  {history.map((record, index) => (
-                    <option value={index} key={`${record.company_name}-${record.created_at}`}>
-                      {record.company_name} | {record.created_at}
-                    </option>
-                  ))}
-                </select>
-                {selectedHistory && (
-                  <div className="rounded-md border border-slate-800 bg-slate-950/70 p-3 text-sm">
-                    <div className="flex items-center gap-2 font-semibold">
-                      <Building2 className="h-4 w-4 text-cyan-300" />
-                      {selectedHistory.company_name}
+              <div className="space-y-2 max-h-[520px] overflow-auto">
+                {history.map((record) => (
+                  <button
+                    className="w-full rounded-md border border-slate-800 bg-slate-950/70 p-3 text-left transition hover:border-cyan-400/50 hover:bg-slate-900/80"
+                    key={record.id || `${record.company_name}-${record.created_at}`}
+                    onClick={() => loadHistoryDetail(record)}
+                    type="button"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-100 text-sm">{record.company_name}</span>
+                      <span className="text-[11px] text-slate-500 shrink-0">{record.created_at?.slice(0, 10)}</span>
                     </div>
-                    <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
-                      <Clock3 className="h-3.5 w-3.5" />
-                      {selectedHistory.created_at}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                      {record.recommendation && (
+                        <span className={classNames(
+                          "rounded px-1.5 py-0.5 text-[11px]",
+                          record.recommendation?.toLowerCase().includes("buy") || record.recommendation?.toLowerCase().includes("long")
+                            ? "bg-emerald-400/10 text-emerald-200"
+                            : record.recommendation?.toLowerCase().includes("sell") || record.recommendation?.toLowerCase().includes("short")
+                              ? "bg-red-400/10 text-red-200"
+                              : "bg-amber-400/10 text-amber-200",
+                        )}>
+                          {record.recommendation}
+                        </span>
+                      )}
+                      {record.confidence != null && (
+                        <span>置信度 {typeof record.confidence === "number" ? `${Math.round(record.confidence * 100)}%` : record.confidence}</span>
+                      )}
+                      {record.sources_count != null && (
+                        <span>{record.sources_count} 来源</span>
+                      )}
                     </div>
-                    <div className="mt-3 grid grid-cols-3 gap-2">
-                      <MetricCard label="Rec" value={selectedHistory.recommendation} />
-                      <MetricCard label="Conf" value={selectedHistory.confidence} />
-                      <MetricCard label="Src" value={selectedHistory.sources_count} />
-                    </div>
-                    <p className="mt-3 max-h-40 overflow-auto text-slate-400">{selectedHistory.summary}</p>
-                  </div>
-                )}
+                    {record.summary && (
+                      <p className="mt-1.5 text-[11px] leading-4 text-slate-500 line-clamp-2">{record.summary}</p>
+                    )}
+                  </button>
+                ))}
               </div>
             ) : (
               <p className="text-sm text-slate-500">暂无历史投研记录。</p>
@@ -2211,7 +2493,7 @@ export default function App() {
         <div className="print-report">
           <div className="mb-6 border-b border-slate-300 pb-4">
             <div className="text-xs uppercase tracking-wide text-slate-500">DeepAlpha Research Report</div>
-            <h1 className="mt-2 text-2xl font-bold text-slate-950">{selectedCompanyName} 投研报告</h1>
+            <h1 className="mt-2 text-2xl font-bold text-slate-950">{reportResult.company_name || selectedCompanyName} 投研报告</h1>
             <div className="mt-2 text-sm text-slate-600">
               Symbol: {ticker || "N/A"} · Provider: {marketProvider.toUpperCase()} · Sources: {reportResult.final_report?.sources_count ?? 0}
             </div>

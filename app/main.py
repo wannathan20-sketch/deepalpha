@@ -21,6 +21,7 @@ from app.errors import LLMProviderError
 from app.graph import run_deepalpha_graph
 from app.memory.store import (
     add_to_watchlist,
+    get_history_by_id,
     get_research_history,
     get_watchlist,
     save_research_history,
@@ -511,6 +512,7 @@ def _build_report_response(result: dict) -> dict:
         "market_profile": result.get("market_profile", {}),
         "financial_profile": result.get("financial_profile", {}),
         "citation_check": result["citation_check"],
+        "analysis_context": result.get("analysis_context", {}),
         "trace_summary": {
             "trace_id": trace["trace_id"],
             "duration_seconds": trace["duration_seconds"],
@@ -533,6 +535,7 @@ def _run_report_task(task_id: str, request: AnalyzeRequest) -> None:
 
     try:
         result = _run_analysis(request, progress_callback=progress)
+        payload = _build_report_response(result)
         save_research_history(
             result["company_name"],
             result["thread_id"],
@@ -541,8 +544,9 @@ def _run_report_task(task_id: str, request: AnalyzeRequest) -> None:
             symbol=request.symbol,
             yahoo_symbol=request.yahoo_symbol,
             data_provider=request.data_provider,
+            markdown_report=result.get("markdown_report", ""),
+            result_json=payload,
         )
-        payload = _build_report_response(result)
         report_tasks.complete_task(task_id, payload)
         log_event("report_task_completed", task_id=task_id, company_name=result["company_name"])
     except Exception as exc:
@@ -556,6 +560,7 @@ def _run_report_task(task_id: str, request: AnalyzeRequest) -> None:
 def analyze(request: AnalyzeRequest, http_request: Request) -> dict:
     _enforce_report_generation_limits(http_request)
     result = _run_analysis(request)
+    payload = _build_report_response(result)
     save_research_history(
         result["company_name"],
         result["thread_id"],
@@ -564,6 +569,8 @@ def analyze(request: AnalyzeRequest, http_request: Request) -> dict:
         symbol=request.symbol,
         yahoo_symbol=request.yahoo_symbol,
         data_provider=request.data_provider,
+        markdown_report=result.get("markdown_report", ""),
+        result_json=payload,
     )
     return result
 
@@ -572,6 +579,7 @@ def analyze(request: AnalyzeRequest, http_request: Request) -> dict:
 def report(request: AnalyzeRequest, http_request: Request) -> dict:
     _enforce_report_generation_limits(http_request)
     result = _run_analysis(request)
+    payload = _build_report_response(result)
     save_research_history(
         result["company_name"],
         result["thread_id"],
@@ -580,9 +588,11 @@ def report(request: AnalyzeRequest, http_request: Request) -> dict:
         symbol=request.symbol,
         yahoo_symbol=request.yahoo_symbol,
         data_provider=request.data_provider,
+        markdown_report=result.get("markdown_report", ""),
+        result_json=payload,
     )
 
-    return _build_report_response(result)
+    return payload
 
 
 @app.post("/report/tasks", response_model=ReportTaskCreateResponse)
@@ -701,6 +711,17 @@ def report_chat_history_delete(task_id: str, http_request: Request) -> dict:
 @app.get("/memory/history")
 def memory_history() -> list[dict]:
     return get_research_history()
+
+
+@app.get("/memory/history/detail/{history_id}")
+def memory_history_detail(history_id: int) -> dict:
+    """Return a single history record with full report data for viewing and chat.
+    返回单条历史记录，含完整报告正文与结构化结果，用于报告回看和追问。
+    """
+    record = get_history_by_id(history_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="History record not found")
+    return record
 
 
 @app.get("/memory/history/{company_name}")
