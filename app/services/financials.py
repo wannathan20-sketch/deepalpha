@@ -614,6 +614,7 @@ AKSHARE_FIELD_CANDIDATES = {
     "net_income": [
         "PARENT_NETPROFIT",
         "NETPROFIT",
+        "HOLDER_PROFIT",
         "归属于母公司股东的净利润",
         "归属母公司股东的净利润",
         "归母净利润",
@@ -623,7 +624,7 @@ AKSHARE_FIELD_CANDIDATES = {
     ],
     "gross_margin_percent": ["GROSS_PROFIT_RATIO", "销售毛利率", "销售毛利率(%)", "毛利率", "Gross Margin"],
     "net_margin_percent": ["NETPROFIT_MARGIN", "销售净利率", "销售净利率(%)", "净利率", "Net Margin"],
-    "roe_percent": ["ROE_WEIGHT", "ROE", "加权净资产收益率", "净资产收益率", "净资产收益率(%)"],
+    "roe_percent": ["ROE_WEIGHT", "ROE", "ROE_AVG", "加权净资产收益率", "净资产收益率", "净资产收益率(%)"],
     "debt_to_asset_percent": ["DEBT_ASSET_RATIO", "资产负债率", "资产负债率(%)"],
     "operating_cash_flow": [
         "NETCASH_OPERATE",
@@ -1334,6 +1335,120 @@ def _fetch_capital_flow_context(ak: object) -> dict:
         return {"enabled": False, "warnings": [type(exc).__name__]}
 
 
+_HK_SEGMENT_KEYWORDS = [
+    "value-added services", "marketing services", "fintech", "business services",
+    "cloud", "e-commerce", "advertising", "gaming", "social", "entertainment",
+    "payment", "wealth management", "insurance", "banking", "securities",
+    "logistics", "retail", "wholesale", "manufacturing", "real estate",
+    "property", "hotel", "telecom", "internet", "software", "hardware",
+    "consumer", "healthcare", "pharmaceutical", "medical", "education",
+    "energy", "utility", "transport", "aviation", "shipping", "port",
+    "mining", "metal", "chemical", "construction", "infrastructure",
+    "media", "publishing", "sports", "food", "beverage", "agriculture",
+    "automobile", "airline", "tourism", "semiconductor", "biotech",
+    "online games", "online advertising", "social networks", "digital content",
+]
+
+
+def _extract_qualitative_segments(business_summary: str) -> list[str]:
+    """Extract business segment names from yfinance business summary text."""
+    text_lower = business_summary.lower()
+    found = []
+    for kw in _HK_SEGMENT_KEYWORDS:
+        if kw in text_lower:
+            found.append(kw)
+    # Deduplicate (e.g. "cloud" vs "cloud services") by keeping longer matches
+    found.sort(key=len, reverse=True)
+    deduped = []
+    for seg in found:
+        if not any(seg in other and seg != other for other in deduped):
+            deduped.append(seg)
+    deduped.sort()  # alphabetical for stable output
+    return deduped
+
+
+def _fetch_hk_yfinance_context(symbol: MarketSymbol) -> dict:
+    """Fetch supplementary HK stock data from yfinance.
+
+    Returns enriched context: business summary, sector, industry, growth
+    metrics, and qualitative segment hints. Never blocks the profile build.
+    """
+    context: dict = {
+        "enabled": False,
+        "source": "yfinance",
+        "business_summary": "",
+        "sector": "",
+        "industry": "",
+        "qualitative_segments": [],
+        "revenue_growth": None,
+        "earnings_growth": None,
+        "operating_margins": None,
+        "recommendation": "",
+        "warnings": [],
+    }
+    try:
+        import yfinance as yf  # noqa: PLC0415 — lazy import
+    except Exception:
+        context["warnings"].append("yfinance not available")
+        return context
+
+    try:
+        ticker = yf.Ticker(symbol.yahoo_symbol)
+        info = ticker.info or {}
+    except Exception as exc:
+        context["warnings"].append(f"yfinance Ticker failed: {type(exc).__name__}")
+        return context
+
+    if not info or info.get("trailingPegRatio") is None and not info.get("longBusinessSummary"):
+        # No meaningful data returned (often means invalid/unlisted symbol for yfinance)
+        context["warnings"].append("No yfinance info returned for this symbol")
+        return context
+
+    context["enabled"] = True
+    context["business_summary"] = str(info.get("longBusinessSummary", ""))
+    context["sector"] = str(info.get("sector", "") or info.get("sectorDisp", ""))
+    context["industry"] = str(info.get("industry", "") or info.get("industryDisp", ""))
+    context["revenue_growth"] = info.get("revenueGrowth")
+    context["earnings_growth"] = info.get("earningsGrowth")
+    context["operating_margins"] = info.get("operatingMargins")
+    context["recommendation"] = str(info.get("recommendationKey", "") or info.get("recommendationMean", ""))
+
+    if context["business_summary"]:
+        segments = _extract_qualitative_segments(context["business_summary"])
+        context["qualitative_segments"] = segments
+
+    return context
+
+
+def _build_hk_segment_data(yfinance_context: dict) -> dict:
+    """Build segment_data dict for HK stocks using yfinance qualitative context.
+
+    Returns the standard segment_data structure expected by report generator
+    and financial analyst, with quantitative=False to signal that revenue
+    figures per segment are not available from free data sources.
+    """
+    if not yfinance_context.get("enabled"):
+        return {"enabled": False, "source": "", "warnings": yfinance_context.get("warnings", [])}
+
+    segments = yfinance_context.get("qualitative_segments", [])
+    business_summary = yfinance_context.get("business_summary", "")
+
+    return {
+        "enabled": True,
+        "source": "yfinance_business_summary",
+        "report_date": None,
+        "quantitative": False,
+        "business_summary": business_summary,
+        "qualitative_segments": segments,
+        "sector": yfinance_context.get("sector", ""),
+        "industry": yfinance_context.get("industry", ""),
+        "by_product": [],
+        "by_industry": [],
+        "by_region": [],
+        "warnings": yfinance_context.get("warnings", []),
+    }
+
+
 def _build_hk_financial_profile(symbol: MarketSymbol) -> dict:
     source = "akshare_hk"
     try:
@@ -1376,12 +1491,18 @@ def _build_hk_financial_profile(symbol: MarketSymbol) -> dict:
         if latest else {}
     )
 
-    # Optional: profit forecast, dividends, capital flow
+    # YoY comparison — use prior period record for revenue/net_income/OCF change %
+    prev_record = _previous_period_record(records, latest) if latest else {}
+    prev_values = _akshare_values_from_record(prev_record) if prev_record else {}
+
+    # Optional: profit forecast, dividends, capital flow, yfinance context
     mgmt_guidance = _fetch_hk_profit_forecast(ak, symbol)
     dividends = _fetch_hk_dividends(ak, symbol)
     capital_flow = _fetch_capital_flow_context(ak)
+    yfinance_context = _fetch_hk_yfinance_context(symbol)
+    segment_data = _build_hk_segment_data(yfinance_context)
 
-    return _akshare_profile_from_values(
+    profile = _akshare_profile_from_values(
         symbol=symbol,
         source=source,
         currency="HKD",
@@ -1389,10 +1510,14 @@ def _build_hk_financial_profile(symbol: MarketSymbol) -> dict:
         values=values,
         announcements=_announcements_from_records(announcements_records, source),
         errors=errors,
+        prev_values=prev_values,
         management_guidance=mgmt_guidance,
+        segment_data=segment_data,
         dividends=dividends,
         capital_flow_context=capital_flow,
     )
+    profile["yfinance_context"] = yfinance_context
+    return profile
 
 
 def _build_sec_financial_profile(symbol: str | None, exchange: str | None = None) -> dict:

@@ -2,9 +2,11 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.services.financials import build_financial_profile
+from app.services.financials import _pivot_hk_row_records, build_financial_profile
 
 
 class Frame:
@@ -316,8 +318,6 @@ def test_cn_graceful_degradation_when_new_sources_fail(monkeypatch) -> None:
 
 def test_hk_pivot_row_records(monkeypatch) -> None:
     """HK balance sheet row records should be pivoted to column-oriented format."""
-    from app.services.financials import _pivot_hk_row_records
-
     records = [
         {"STD_ITEM_NAME": "资产总额", "AMOUNT": 5_000_000_000, "REPORT_DATE": "2026-03-31"},
         {"STD_ITEM_NAME": "现金及现金等价物", "AMOUNT": 800_000_000, "REPORT_DATE": "2026-03-31"},
@@ -362,3 +362,145 @@ def test_cn_management_guidance_fields_exist(monkeypatch) -> None:
     assert "capital_flow_context" in profile
     assert "short_term_debt" in profile
     assert "long_term_debt" in profile
+
+
+def test_hk_yoy_change_when_prior_period_exists(monkeypatch) -> None:
+    """HK YoY: _build_hk_financial_profile should pass prev_values for revenue/net_income/OCF change %."""
+    fake_akshare = SimpleNamespace(
+        stock_financial_hk_analysis_indicator_em=lambda symbol, indicator="年度": Frame(
+            [
+                {
+                    "REPORT_DATE": "2026-03-31",
+                    "OPERATE_INCOME": 660_000_000_000,
+                    "HOLDER_PROFIT": 200_000_000_000,
+                    "GROSS_PROFIT_RATIO": 53.0,
+                    "NET_PROFIT_RATIO": 30.0,
+                    "ROE_AVG": 22.0,
+                    "DEBT_ASSET_RATIO": 41.0,
+                    "BASIC_EPS": 21.0,
+                    "DILUTED_EPS": 20.5,
+                },
+                {
+                    "REPORT_DATE": "2025-03-31",
+                    "OPERATE_INCOME": 600_000_000_000,
+                    "HOLDER_PROFIT": 180_000_000_000,
+                    "GROSS_PROFIT_RATIO": 52.0,
+                    "NET_PROFIT_RATIO": 29.0,
+                    "ROE_AVG": 20.0,
+                    "DEBT_ASSET_RATIO": 43.0,
+                    "BASIC_EPS": 19.0,
+                    "DILUTED_EPS": 18.5,
+                },
+            ]
+        ),
+        stock_financial_hk_report_em=lambda stock, symbol="现金流量表", indicator="年度": Frame([]),
+        stock_individual_notice_report=lambda security, symbol="财务报告", begin_date=None, end_date=None: Frame(
+            [{"公告日期": "2026-04-30", "公告标题": "腾讯 年度业绩公告", "公告链接": "https://data.eastmoney.com/notices/detail/00700/test.html", "公告类型": "财务报告"}]
+        ),
+    )
+    monkeypatch.setattr("app.services.financials._akshare_module", lambda: fake_akshare, raising=False)
+    # Stub out yfinance calls for this test — avoid real network
+    monkeypatch.setattr(
+        "app.services.financials._fetch_hk_yfinance_context",
+        lambda symbol: {"enabled": False, "source": "yfinance", "warnings": ["test stub"]},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.financials._build_hk_segment_data",
+        lambda yf_ctx: {"enabled": False, "source": "", "warnings": []},
+        raising=False,
+    )
+
+    profile = build_financial_profile("0700.HK", "HKEX")
+
+    assert profile["enabled"] is True
+    assert profile["revenue"] == 660_000_000_000
+    assert profile["net_income"] == 200_000_000_000
+    assert profile["revenue_change_percent"] == 10.0  # (660B - 600B) / 600B * 100
+    assert profile["net_income_change_percent"] == pytest.approx(11.111, abs=0.01)  # (200B - 180B) / 180B * 100
+    assert profile["eps_diluted"] == 20.5
+    assert profile["gross_margin_percent"] == 53.0
+    assert profile["roe_percent"] == 22.0
+
+
+def test_hk_segment_data_qualitative_when_yfinance_available(monkeypatch) -> None:
+    """HK segment_data should be qualitative (quantitative=False) with yfinance context."""
+    fake_akshare = SimpleNamespace(
+        stock_financial_hk_analysis_indicator_em=lambda symbol, indicator="年度": Frame(
+            [{"REPORT_DATE": "2026-03-31", "OPERATE_INCOME": 660_000_000_000, "HOLDER_PROFIT": 200_000_000_000}]
+        ),
+        stock_financial_hk_report_em=lambda stock, symbol="现金流量表", indicator="年度": Frame([]),
+        stock_individual_notice_report=lambda security, symbol="财务报告", begin_date=None, end_date=None: Frame(
+            [{"公告日期": "2026-04-30", "公告标题": "腾讯 年度业绩公告", "公告链接": "https://example.com/test", "公告类型": "财务报告"}]
+        ),
+    )
+    monkeypatch.setattr("app.services.financials._akshare_module", lambda: fake_akshare, raising=False)
+    monkeypatch.setattr(
+        "app.services.financials._fetch_hk_yfinance_context",
+        lambda symbol: {
+            "enabled": True,
+            "source": "yfinance",
+            "business_summary": "Tencent provides value-added services, fintech, and business services.",
+            "sector": "Communication Services",
+            "industry": "Internet Content & Information",
+            "qualitative_segments": ["value-added services", "fintech", "business services"],
+            "revenue_growth": 0.091,
+            "earnings_growth": 0.229,
+            "operating_margins": 0.343,
+            "warnings": [],
+        },
+        raising=False,
+    )
+    # _build_hk_segment_data runs with real logic — processes the yfinance mock above
+
+    profile = build_financial_profile("0700.HK", "HKEX")
+
+    assert profile["enabled"] is True
+    assert profile["revenue"] == 660_000_000_000
+    assert profile["revenue_change_percent"] is None  # Only one period, no YoY
+    assert profile["yfinance_context"]["enabled"] is True
+    assert "Tencent" in profile["yfinance_context"]["business_summary"]
+
+    seg = profile["segment_data"]
+    assert seg["enabled"] is True
+    assert seg["quantitative"] is False
+    assert seg["source"] == "yfinance_business_summary"
+    assert "value-added services" in seg["qualitative_segments"]
+    assert "fintech" in seg["qualitative_segments"]
+    assert seg["sector"] == "Communication Services"
+    assert seg["industry"] == "Internet Content & Information"
+
+
+def test_hk_yfinance_context_graceful_failure(monkeypatch) -> None:
+    """HK profile should build successfully even when yfinance is unavailable."""
+    fake_akshare = SimpleNamespace(
+        stock_financial_hk_analysis_indicator_em=lambda symbol, indicator="年度": Frame(
+            [{"REPORT_DATE": "2026-03-31", "OPERATE_INCOME": 660_000_000_000, "HOLDER_PROFIT": 200_000_000_000}]
+        ),
+        stock_financial_hk_report_em=lambda stock, symbol="现金流量表", indicator="年度": Frame([]),
+        stock_individual_notice_report=lambda security, symbol="财务报告", begin_date=None, end_date=None: Frame(
+            [{"公告日期": "2026-04-30", "公告标题": "腾讯 年度业绩公告", "公告链接": "https://example.com/test", "公告类型": "财务报告"}]
+        ),
+    )
+    monkeypatch.setattr("app.services.financials._akshare_module", lambda: fake_akshare, raising=False)
+    # Simulate yfinance import failure
+    monkeypatch.setattr(
+        "app.services.financials._fetch_hk_yfinance_context",
+        lambda symbol: {"enabled": False, "source": "yfinance", "warnings": ["yfinance not available"]},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.financials._build_hk_segment_data",
+        lambda yf_ctx: {"enabled": False, "source": "", "warnings": yf_ctx.get("warnings", [])},
+        raising=False,
+    )
+
+    profile = build_financial_profile("0700.HK", "HKEX")
+
+    # Must still build successfully
+    assert profile["enabled"] is True
+    assert profile["revenue"] == 660_000_000_000
+    assert profile["yfinance_context"]["enabled"] is False
+    assert "yfinance not available" in profile["yfinance_context"]["warnings"]
+    # segment_data should be disabled
+    assert profile["segment_data"]["enabled"] is False

@@ -77,23 +77,36 @@ def _build_financial_profile_text(financial_profile: dict) -> str:
     # Segment data
     seg = financial_profile.get("segment_data", {})
     if seg.get("enabled"):
-        lines.append(f"\n分业务收入结构（报告期 {seg.get('report_date', '')}）：")
-        for key, label in [("by_product", "按产品"), ("by_industry", "按行业"), ("by_region", "按地区")]:
-            items = seg.get(key, [])
-            if items:
-                lines.append(f"\n  {label}分类：")
-                for item in items:
-                    parts = [item.get("segment", "")]
-                    rev = item.get("revenue")
-                    rev_pct = item.get("revenue_pct")
-                    gm = item.get("gross_margin")
-                    if rev is not None:
-                        parts.append(f"收入 {rev:,.0f}")
-                    if rev_pct is not None:
-                        parts.append(f"占比 {rev_pct}%")
-                    if gm is not None:
-                        parts.append(f"毛利率 {gm}%")
-                    lines.append(f"    {'，'.join(parts)}")
+        if seg.get("quantitative") is not False:
+            # CN: structured quantitative segment data
+            lines.append(f"\n分业务收入结构（报告期 {seg.get('report_date', '')}）：")
+            for key, label in [("by_product", "按产品"), ("by_industry", "按行业"), ("by_region", "按地区")]:
+                items = seg.get(key, [])
+                if items:
+                    lines.append(f"\n  {label}分类：")
+                    for item in items:
+                        parts = [item.get("segment", "")]
+                        rev = item.get("revenue")
+                        rev_pct = item.get("revenue_pct")
+                        gm = item.get("gross_margin")
+                        if rev is not None:
+                            parts.append(f"收入 {rev:,.0f}")
+                        if rev_pct is not None:
+                            parts.append(f"占比 {rev_pct}%")
+                        if gm is not None:
+                            parts.append(f"毛利率 {gm}%")
+                        lines.append(f"    {'，'.join(parts)}")
+        else:
+            # HK: qualitative segment context from yfinance
+            qual_segs = seg.get("qualitative_segments", [])
+            if qual_segs:
+                lines.append(f"\n分业务板块（定性来源 — {seg.get('source', '')}）：")
+                lines.append(f"  识别板块：{' / '.join(qual_segs)}")
+                lines.append("  注意：上述为业务描述中提取的定性分类，非结构化财务数据。")
+            sector = seg.get("sector", "")
+            industry = seg.get("industry", "")
+            if sector or industry:
+                lines.append(f"  GICS 分类：{sector} / {industry}" if (sector and industry) else "")
 
     # Official management earnings guidance
     eg = financial_profile.get("earnings_guidance", {})
@@ -161,8 +174,11 @@ def analyze(company_name: str, context: dict) -> dict:
     risks = [
         "公开搜索结果不能替代正式财报，收入、利润率和现金流需以公司披露文件复核。",
     ]
-    if not financial_profile.get("segment_data", {}).get("enabled"):
+    seg = financial_profile.get("segment_data", {})
+    if not seg.get("enabled"):
         risks.append("缺少分业务数据时，无法判断增长质量与利润贡献结构。")
+    elif seg.get("quantitative") is False:
+        risks.append("分业务数据仅为定性分类（非结构化营收数字），增长质量判断需额外核实。")
     if not financial_profile.get("earnings_guidance", {}).get("enabled"):
         risks.append("缺少管理层正式业绩指引，盈利预测仅依赖分析师共识。")
 

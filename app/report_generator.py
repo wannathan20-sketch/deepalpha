@@ -297,26 +297,45 @@ def generate_markdown_report(
                 for w in mgmt["warnings"]:
                     lines.append(f"- ⚠️ {w}")
 
-        # Segment data (CN only)
+        # Segment data
         seg = financial_profile.get("segment_data", {})
         if seg.get("enabled"):
             lines.extend(["", "### 分业务收入结构", ""])
-            for key, label in [("by_product", "按产品分类"), ("by_industry", "按行业分类"), ("by_region", "按地区分类")]:
-                items = seg.get(key, [])
-                if items:
-                    lines.append(f"**{label}**：")
-                    for item in items:
-                        parts = [item.get("segment", "")]
-                        rev = item.get("revenue")
-                        rev_pct = item.get("revenue_pct")
-                        gm = item.get("gross_margin")
-                        if rev is not None:
-                            parts.append(f"收入 {rev:,.0f}")
-                        if rev_pct is not None:
-                            parts.append(f"占比 {rev_pct}%")
-                        if gm is not None:
-                            parts.append(f"毛利率 {gm}%")
-                        lines.append(f"- {'，'.join(parts)}")
+            if seg.get("quantitative") is not False:
+                # CN-style quantitative breakdown (by product / industry / region)
+                for key, label in [("by_product", "按产品分类"), ("by_industry", "按行业分类"), ("by_region", "按地区分类")]:
+                    items = seg.get(key, [])
+                    if items:
+                        lines.append(f"**{label}**：")
+                        for item in items:
+                            parts = [item.get("segment", "")]
+                            rev = item.get("revenue")
+                            rev_pct = item.get("revenue_pct")
+                            gm = item.get("gross_margin")
+                            if rev is not None:
+                                parts.append(f"收入 {rev:,.0f}")
+                            if rev_pct is not None:
+                                parts.append(f"占比 {rev_pct}%")
+                            if gm is not None:
+                                parts.append(f"毛利率 {gm}%")
+                            lines.append(f"- {'，'.join(parts)}")
+            else:
+                # HK qualitative segment context (yfinance)
+                qual_segs = seg.get("qualitative_segments", [])
+                if qual_segs:
+                    lines.append(f"**业务板块**（定性来源 — {seg.get('source', '')}）：")
+                    lines.append(f"- {' / '.join(qual_segs)}")
+                sector = seg.get("sector", "")
+                industry = seg.get("industry", "")
+                if sector or industry:
+                    parts = []
+                    if sector:
+                        parts.append(f"行业板块: {sector}")
+                    if industry:
+                        parts.append(f"细分行业: {industry}")
+                    lines.append(f"- {'，'.join(parts)}")
+                lines.append("")
+                lines.append("> ⚠️ 港股分业务结构化收入数据需付费数据源（Bloomberg/Wind），当前为定性分类。")
             if seg.get("warnings"):
                 for w in seg["warnings"]:
                     lines.append(f"- ⚠️ {w}")
