@@ -88,7 +88,7 @@ flowchart LR
 | --- | --- | --- |
 | A 股 | AkShare -> Efinance -> Baostock -> Yahoo | AkShare 是核心来源；Efinance、Baostock 为可选增强 |
 | 港股 | AkShare 港股指数 -> Yahoo -> AkShare | 复盘指数优先走 AkShare 港股指数，Yahoo 作为降级源，港股个股继续可走 Yahoo/AkShare |
-| 美股 | Yahoo -> Nasdaq -> Finnhub | Nasdaq 为无需密钥的复盘降级源；Finnhub 需要 `FINNHUB_API_KEY` |
+| 美股 | Nasdaq -> Yahoo -> Finnhub | Nasdaq 为无需密钥的主力美股源；Yahoo 作为降级增强；Finnhub 需要 `FINNHUB_API_KEY` |
 
 显式指定 provider 时不会自动切换到其他来源。
 
@@ -100,7 +100,7 @@ flowchart LR
 | --- | --- | --- |
 | A 股 | 上证指数、深证成指、创业板指、科创50 | 复用行情 provider 链，优先按 A 股 provider 路由；若板块表现或涨跌家数无法稳定获取，会保留为空并在 `context_status` 中标记质量 |
 | 港股 | 恒生指数、恒生科技指数 | 优先 AkShare 港股指数历史行情；Yahoo 被限流或 AkShare 异常时保留 `provider_attempts` 和错误摘要 |
-| 美股 | S&P 500、Nasdaq、Dow | 优先 Yahoo；Yahoo 被限流时，Nasdaq Composite 使用 Nasdaq 官方指数数据，S&P 500 / Dow 使用 SPY / DIA ETF 代理，并通过 `instrument_type`、`proxy_symbol`、`proxy_for` 明确标记 |
+| 美股 | S&P 500、Nasdaq、Dow | 优先 Nasdaq；Nasdaq 被限流时，Nasdaq Composite 使用 Nasdaq 官方指数数据，S&P 500 / Dow 使用 SPY / DIA ETF 代理，并通过 `instrument_type`、`proxy_symbol`、`proxy_for` 明确标记 |
 
 ETF 代理的涨跌幅可用于轻量复盘，但 ETF 收盘价不是指数点位，精确指数水平仍需结合指数行情终端复核。数据源失败时不会用 mock 代替，接口会返回 `available`、`partial`、`missing`、`fetch_failed` 或 `not_supported`。接口默认通过 `MARKET_REVIEW_CACHE_TTL_SECONDS=300` 缓存 5 分钟，并返回 `cache_hit` 与 `generated_at`，前端会展示 provider、来源链接、直接指数/ETF 代理标识。
 
@@ -429,7 +429,7 @@ SEC_USER_AGENT=DeepAlpha production contact@example.com
 | `POST` | `/symbol/resolve-batch` | 批量解析 Watchlist 导入文本或 CSV 中的证券 |
 | `GET` | `/market/chart` | 获取行情和 provider 降级信息 |
 | `GET` | `/market/review` | 获取 A 股、港股、美股市场复盘 |
-| `GET` | `/financials/latest` | 获取 SEC 财务摘要 |
+| `GET` | `/financials/latest` | 获取 A 股/港股/美股财务数据、公告与管理层指引 |
 | `POST` | `/analyze` | 返回完整 Agent 输出、上下文、引用和 trace |
 | `POST` | `/report` | 返回前端展示用报告 |
 | `POST` | `/report/tasks` | 创建后台报告任务 |
@@ -438,6 +438,9 @@ SEC_USER_AGENT=DeepAlpha production contact@example.com
 | `GET` | `/chat/report/{task_id}/history` | 查询报告追问历史 |
 | `DELETE` | `/chat/report/{task_id}/history` | 清空报告追问历史 |
 | `GET` | `/memory/history` | 查询研究历史 |
+| `GET` | `/memory/history/detail/{history_id}` | 查询研究历史详情（含完整报告） |
+| `GET` | `/memory/history/{company_name}` | 按公司名查询历史 |
+| `DELETE` | `/memory/history/{history_id}` | 删除研究历史记录 |
 | `GET` / `POST` | `/memory/watchlist` | 查询或新增关注标的 |
 
 ## 可选部署：CI 通过后发布到 Zeabur
