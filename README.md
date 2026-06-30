@@ -6,6 +6,10 @@ DeepAlpha 是一个面向 A 股、港股和美股的多智能体投研系统。�
 
 当前项目定位是“研究辅助工具”和“投研工作流原型”。它可以帮助整理公开信息、形成分析框架、暴露数据缺口，但不提供投资建议、交易指令或收益承诺。
 
+## 项目展示
+
+![DeepAlpha 市场复盘](docs/images/deepalpha-market-review.png)
+
 ## 项目交付目标
 
 本仓库按可复现的开源工程组织，目标是让使用者在本地完成安装、启动、验证和基础演示：
@@ -233,20 +237,6 @@ VITE_API_BASE=https://api.deepalpha.best
 4. 创建报告任务，等待多 Agent 工作流生成 Markdown 报告。
 5. 查看报告正文、历史记录、报告追问和来源质量提示。
 6. 使用 Watchlist 导入或保存关注标的。
-
-### 前端预览
-
-市场复盘：
-
-![DeepAlpha 市场复盘](docs/images/deepalpha-market-review.png)
-
-投研工作台：
-
-![DeepAlpha 工作台](docs/images/deepalpha-workbench.png)
-
-报告视图：
-
-![DeepAlpha 报告视图](docs/images/deepalpha-report.png)
 
 ## 报告输出示例
 

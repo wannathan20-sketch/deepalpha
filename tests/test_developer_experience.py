@@ -30,10 +30,12 @@ def test_docker_compose_runs_backend_and_frontend_demo() -> None:
     assert '"5173:5173"' in content
 
 
-def test_readme_links_quick_start_and_frontend_screenshots() -> None:
+def test_readme_links_quick_start_and_project_showcase_screenshot() -> None:
     content = README.read_text(encoding="utf-8")
 
     assert "bash scripts/dev.sh" in content
     assert "docker compose up --build" in content
-    assert "docs/images/deepalpha-workbench.png" in content
-    assert "docs/images/deepalpha-report.png" in content
+    assert "## 项目展示" in content
+    assert "docs/images/deepalpha-market-review.png" in content
+    assert "docs/images/deepalpha-workbench.png" not in content
+    assert "docs/images/deepalpha-report.png" not in content
