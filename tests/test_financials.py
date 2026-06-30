@@ -34,6 +34,28 @@ def test_cn_financial_profile_uses_akshare_summary_and_announcements(monkeypatch
             ]
         ),
         stock_cash_flow_sheet_by_report_em=lambda symbol: Frame([]),
+        stock_balance_sheet_by_report_em=lambda symbol: Frame(
+            [
+                {
+                    "REPORT_DATE": "2026-03-31",
+                    "MONETARYFUNDS": 800_000_000,
+                    "SHORT_LOAN": 50_000_000,
+                    "LONG_LOAN": 100_000_000,
+                    "TOTAL_ASSETS": 2_500_000_000,
+                    "TOTAL_LIABILITIES": 635_000_000,
+                    "TOTAL_PARENT_EQUITY": 1_865_000_000,
+                }
+            ]
+        ),
+        stock_profit_sheet_by_report_em=lambda symbol: Frame(
+            [
+                {
+                    "REPORT_DATE": "2026-03-31",
+                    "DILUTED_EPS": 12.5,
+                    "OPERATE_PROFIT": 1_100_000_000,
+                }
+            ]
+        ),
         stock_individual_notice_report=lambda security, symbol="财务报告", begin_date=None, end_date=None: Frame(
             [
                 {
@@ -62,6 +84,15 @@ def test_cn_financial_profile_uses_akshare_summary_and_announcements(monkeypatch
     assert profile["roe_percent"] == 31.5
     assert profile["debt_to_asset_percent"] == 25.4
     assert profile["operating_cash_flow"] == 650_000_000
+    assert profile["eps_diluted"] == 12.5
+    assert profile["operating_income"] == 1_100_000_000
+    assert profile["cash"] == 800_000_000
+    assert profile["debt"] == 150_000_000
+    assert profile["total_assets"] == 2_500_000_000
+    assert profile["total_liabilities"] == 635_000_000
+    assert profile["shareholders_equity"] == 1_865_000_000
+    assert profile["short_term_debt"] == 50_000_000
+    assert profile["long_term_debt"] == 100_000_000
     assert profile["announcements"][0]["url"].startswith("https://data.eastmoney.com/")
     assert profile["filing_url"] == profile["announcements"][0]["url"]
 
@@ -171,3 +202,163 @@ def test_us_financial_profile_keeps_sec_companyfacts_source(monkeypatch) -> None
     assert profile["source"] == "sec_companyfacts"
     assert profile["symbol"] == "AAPL"
     assert profile["revenue"] == 100
+
+
+def test_cn_yoy_change_when_prior_period_exists(monkeypatch) -> None:
+    fake_akshare = SimpleNamespace(
+        stock_financial_analysis_indicator_em=lambda symbol, indicator="按报告期": Frame(
+            [
+                {
+                    "REPORT_DATE": "2026-03-31",
+                    "TOTAL_OPERATE_INCOME": 1_500_000_000,
+                    "PARENT_NETPROFIT": 750_000_000,
+                    "GROSS_PROFIT_RATIO": 90.0,
+                    "NETPROFIT_MARGIN": 50.0,
+                    "ROE_WEIGHT": 30.0,
+                    "DEBT_ASSET_RATIO": 25.0,
+                    "NETCASH_OPERATE": 600_000_000,
+                },
+                {
+                    "REPORT_DATE": "2025-03-31",
+                    "TOTAL_OPERATE_INCOME": 1_200_000_000,
+                    "PARENT_NETPROFIT": 600_000_000,
+                    "GROSS_PROFIT_RATIO": 88.0,
+                    "NETPROFIT_MARGIN": 48.0,
+                    "ROE_WEIGHT": 28.0,
+                    "DEBT_ASSET_RATIO": 27.0,
+                    "NETCASH_OPERATE": 500_000_000,
+                },
+            ]
+        ),
+        stock_cash_flow_sheet_by_report_em=lambda symbol: Frame([]),
+        stock_balance_sheet_by_report_em=lambda symbol: Frame([]),
+        stock_profit_sheet_by_report_em=lambda symbol: Frame([]),
+        stock_individual_notice_report=lambda security, symbol="财务报告", begin_date=None, end_date=None: Frame(
+            [{"公告日期": "2026-04-30", "公告标题": "Q1 Report", "公告链接": "https://example.com/report", "公告类型": "财务报告"}]
+        ),
+    )
+    monkeypatch.setattr("app.services.financials._akshare_module", lambda: fake_akshare, raising=False)
+
+    profile = build_financial_profile("600519", "SSE")
+
+    assert profile["enabled"] is True
+    assert profile["revenue"] == 1_500_000_000
+    assert profile["revenue_change_percent"] == 25.0  # (1500-1200)/1200*100
+    assert profile["net_income"] == 750_000_000
+    assert profile["net_income_change_percent"] == 25.0  # (750-600)/600*100
+    assert profile["operating_cash_flow"] == 600_000_000
+    assert profile["operating_cash_flow_change_percent"] == 20.0  # (600-500)/500*100
+
+
+def test_cn_announcement_classification(monkeypatch) -> None:
+    fake_akshare = SimpleNamespace(
+        stock_financial_analysis_indicator_em=lambda symbol, indicator="按报告期": Frame(
+            [{"REPORT_DATE": "2026-03-31", "TOTAL_OPERATE_INCOME": 1_000_000, "PARENT_NETPROFIT": 500_000}]
+        ),
+        stock_cash_flow_sheet_by_report_em=lambda symbol: Frame([]),
+        stock_balance_sheet_by_report_em=lambda symbol: Frame([]),
+        stock_profit_sheet_by_report_em=lambda symbol: Frame([]),
+        stock_individual_notice_report=lambda security, symbol="财务报告", begin_date=None, end_date=None: Frame(
+            [
+                {"公告日期": "2026-04-15", "公告标题": "2025年度报告", "公告链接": "https://eastmoney.com/notice/1", "公告类型": "财务报告"},
+            ]
+            if symbol == "财务报告"
+            else (
+                [
+                    {"公告日期": "2026-03-10", "公告标题": "2025年度业绩预告", "公告链接": "https://eastmoney.com/notice/2", "公告类型": "业绩预告"},
+                ]
+                if symbol == "重大事项"
+                else Frame([])
+            )
+        ),
+    )
+    monkeypatch.setattr("app.services.financials._akshare_module", lambda: fake_akshare, raising=False)
+
+    profile = build_financial_profile("600519", "SSE")
+
+    assert profile["enabled"] is True
+    announcements = profile["announcements"]
+    # Should have both announcements (from different types)
+    assert len(announcements) >= 1
+    # The financial report should be classified correctly
+    fin_reports = [a for a in announcements if a["classified_type"] == "financial_report"]
+    assert len(fin_reports) >= 1
+    assert any("年度报告" in a["title"] for a in fin_reports)
+    # Announcement summary should exist
+    ann_summary = profile.get("announcement_summary", {})
+    assert "financial_report" in ann_summary
+
+
+def test_cn_graceful_degradation_when_new_sources_fail(monkeypatch) -> None:
+    """Balance sheet and profit sheet failures should not block the profile."""
+    fake_akshare = SimpleNamespace(
+        stock_financial_analysis_indicator_em=lambda symbol, indicator="按报告期": Frame(
+            [{"REPORT_DATE": "2026-03-31", "TOTAL_OPERATE_INCOME": 1_000_000, "PARENT_NETPROFIT": 500_000}]
+        ),
+        stock_cash_flow_sheet_by_report_em=lambda symbol: Frame([]),
+        stock_balance_sheet_by_report_em=lambda symbol: (_ for _ in ()).throw(TimeoutError("balance sheet timeout")),
+        stock_profit_sheet_by_report_em=lambda symbol: (_ for _ in ()).throw(TimeoutError("profit sheet timeout")),
+        stock_individual_notice_report=lambda security, symbol="财务报告", begin_date=None, end_date=None: Frame([]),
+    )
+    monkeypatch.setattr("app.services.financials._akshare_module", lambda: fake_akshare, raising=False)
+
+    profile = build_financial_profile("600519", "SSE")
+
+    # Should still return a profile with indicator data
+    assert profile["enabled"] is True
+    assert profile["revenue"] == 1_000_000
+    assert profile["net_income"] == 500_000
+    # Balance sheet fields should remain None but not crash
+    assert profile["cash"] is None
+    assert profile["debt"] is None
+    assert profile["shareholders_equity"] is None
+
+
+def test_hk_pivot_row_records(monkeypatch) -> None:
+    """HK balance sheet row records should be pivoted to column-oriented format."""
+    from app.services.financials import _pivot_hk_row_records
+
+    records = [
+        {"STD_ITEM_NAME": "资产总额", "AMOUNT": 5_000_000_000, "REPORT_DATE": "2026-03-31"},
+        {"STD_ITEM_NAME": "现金及现金等价物", "AMOUNT": 800_000_000, "REPORT_DATE": "2026-03-31"},
+        {"STD_ITEM_NAME": "短期借款", "AMOUNT": 200_000_000, "REPORT_DATE": "2026-03-31"},
+        {"STD_ITEM_NAME": "长期借款", "AMOUNT": 500_000_000, "REPORT_DATE": "2026-03-31"},
+        {"STD_ITEM_NAME": "股东权益", "AMOUNT": 3_000_000_000, "REPORT_DATE": "2026-03-31"},
+        {"STD_ITEM_NAME": "资产总额", "AMOUNT": 4_500_000_000, "REPORT_DATE": "2025-03-31"},
+        {"STD_ITEM_NAME": "现金及现金等价物", "AMOUNT": 700_000_000, "REPORT_DATE": "2025-03-31"},
+    ]
+
+    result = _pivot_hk_row_records(records)
+
+    assert len(result) == 2  # Two periods
+    # Find the 2026 record
+    r2026 = next(r for r in result if r["REPORT_DATE"] == "2026-03-31")
+    assert r2026["total_assets"] == 5_000_000_000
+    assert r2026["cash"] == 800_000_000
+    assert r2026["short_term_debt"] == 200_000_000
+    assert r2026["long_term_debt"] == 500_000_000
+    assert r2026["shareholders_equity"] == 3_000_000_000
+
+
+def test_cn_management_guidance_fields_exist(monkeypatch) -> None:
+    """Profile should include management_guidance, announcement_summary, and capital_flow_context fields."""
+    fake_akshare = SimpleNamespace(
+        stock_financial_analysis_indicator_em=lambda symbol, indicator="按报告期": Frame(
+            [{"REPORT_DATE": "2026-03-31", "TOTAL_OPERATE_INCOME": 1_000_000, "PARENT_NETPROFIT": 500_000}]
+        ),
+        stock_cash_flow_sheet_by_report_em=lambda symbol: Frame([]),
+        stock_balance_sheet_by_report_em=lambda symbol: Frame([]),
+        stock_profit_sheet_by_report_em=lambda symbol: Frame([]),
+        stock_individual_notice_report=lambda security, symbol="财务报告", begin_date=None, end_date=None: Frame([]),
+    )
+    monkeypatch.setattr("app.services.financials._akshare_module", lambda: fake_akshare, raising=False)
+
+    profile = build_financial_profile("600519", "SSE")
+
+    # New fields should always exist (at least with defaults)
+    assert "management_guidance" in profile
+    assert "announcement_summary" in profile
+    assert "dividends" in profile
+    assert "capital_flow_context" in profile
+    assert "short_term_debt" in profile
+    assert "long_term_debt" in profile

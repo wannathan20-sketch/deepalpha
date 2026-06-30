@@ -32,10 +32,12 @@ def _build_financial_text(financial_profile: dict) -> str:
         ("Currency", financial_profile.get("currency")),
         ("Filing", f"{financial_profile.get('filing_type', '')} {financial_profile.get('fiscal_period', '')}".strip()),
         ("Revenue", financial_profile.get("revenue")),
+        ("Revenue Change %", financial_profile.get("revenue_change_percent")),
         ("Gross Margin %", financial_profile.get("gross_margin_percent")),
         ("Operating Income", financial_profile.get("operating_income")),
         ("Operating Margin %", financial_profile.get("operating_margin_percent")),
         ("Net Income", financial_profile.get("net_income")),
+        ("Net Income Change %", financial_profile.get("net_income_change_percent")),
         ("EPS Diluted", financial_profile.get("eps_diluted")),
         ("Operating Cash Flow", financial_profile.get("operating_cash_flow")),
         ("Free Cash Flow", financial_profile.get("free_cash_flow")),
@@ -43,6 +45,7 @@ def _build_financial_text(financial_profile: dict) -> str:
         ("Debt", financial_profile.get("debt")),
         ("Total Assets", financial_profile.get("total_assets")),
         ("Total Liabilities", financial_profile.get("total_liabilities")),
+        ("Shareholders Equity", financial_profile.get("shareholders_equity")),
     ]
     return "\n".join(f"{label}: {value}" for label, value in fields if value not in {None, ""})
 
