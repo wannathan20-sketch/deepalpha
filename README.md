@@ -660,14 +660,6 @@ git ls-files -ci --exclude-standard
 - `frontend/dist/`、`frontend/node_modules/`。
 - `PROJECT_STATE.md`、`docs/superpowers/`、`DeepAlpha_*.md` 等过程资料。
 
-## 已知限制
-
-- 港股分业务收入已通过 yfinance 业务摘要提供定性分类（板块名称 + GICS 行业），但结构化营收数字需付费数据源（Bloomberg/Wind）；港股和美股业绩会原文转录仍需补充。A 股分业务数据已通过 AkShare 主营构成接口覆盖，管理层正式业绩指引已接入业绩预告和业绩快报。
-- 免费或低成本行情、搜索 provider 可能限流，字段完整度也可能变化。
-- 当前异步任务状态保存在进程内，多 worker 或多实例部署需要外部任务存储。
-- 访问码和基础限流适合受控演示，不是完整鉴权体系。
-- LLM 输出必须人工复核，引用覆盖检查不能替代专业判断。
-
 ## 免责声明
 
 DeepAlpha 仅用于技术研究和信息整理。任何输出均不构成投资建议、交易指令、收益承诺或风险保证。使用者应独立核验数据和结论，并自行承担决策风险。
