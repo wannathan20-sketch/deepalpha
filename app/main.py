@@ -21,6 +21,7 @@ from app.errors import LLMProviderError
 from app.graph import run_deepalpha_graph
 from app.memory.store import (
     add_to_watchlist,
+    delete_history_by_id,
     get_history_by_id,
     get_research_history,
     get_watchlist,
@@ -722,6 +723,15 @@ def memory_history_detail(history_id: int) -> dict:
     if record is None:
         raise HTTPException(status_code=404, detail="History record not found")
     return record
+
+
+@app.delete("/memory/history/{history_id}")
+def memory_history_delete(history_id: int) -> dict:
+    """Delete a history record by id. 按 id 删除历史记录。"""
+    deleted = delete_history_by_id(history_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="History record not found")
+    return {"deleted": True, "id": history_id}
 
 
 @app.get("/memory/history/{company_name}")

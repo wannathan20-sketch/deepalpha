@@ -274,6 +274,23 @@ def get_history_by_id(
     return record
 
 
+def delete_history_by_id(
+    history_id: int,
+    *,
+    tenant_id: str = DEFAULT_TENANT_ID,
+    user_id: str = DEFAULT_USER_ID,
+) -> bool:
+    """Delete a single history record by id. Returns True if deleted, False if not found.
+    按 id 删除单条历史记录。
+    """
+    with _connect() as connection:
+        cursor = connection.execute(
+            "DELETE FROM research_history WHERE id = ? AND tenant_id = ? AND user_id = ?",
+            (history_id, tenant_id, user_id),
+        )
+        return cursor.rowcount > 0
+
+
 def add_to_watchlist(
     company_name: str,
     *,
