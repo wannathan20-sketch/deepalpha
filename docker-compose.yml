@@ -1,0 +1,43 @@
+services:
+  api:
+    container_name: deepalpha-api
+    build:
+      context: .
+    environment:
+      - APP_ENV=development
+      - LLM_PROVIDER=mock
+      - SEARCH_PROVIDER=mock
+      - PORT=8000
+      - ENABLE_DEBUG_ROUTES=true
+      - CORS_ALLOW_ORIGIN_REGEX=http://(127\.0\.0\.1|localhost):5173
+      - DEEPALPHA_DB_PATH=/app/data/deepalpha.sqlite3
+      - CHROMA_DB_PATH=/app/data/chroma
+    ports:
+      - "8000:8000"
+    volumes:
+      - deepalpha-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  web:
+    container_name: deepalpha-web
+    image: node:20-slim
+    working_dir: /app/frontend
+    environment:
+      - VITE_API_BASE=http://localhost:8000
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app
+      - deepalpha-frontend-node-modules:/app/frontend/node_modules
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  deepalpha-data:
+  deepalpha-frontend-node-modules:

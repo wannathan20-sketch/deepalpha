@@ -137,6 +137,17 @@ ETF 代理的涨跌幅可用于轻量复盘，但 ETF 收盘价不是指数点�
 ```bash
 git clone https://github.com/wannathan20-sketch/deepalpha.git
 cd deepalpha
+bash scripts/dev.sh
+```
+
+脚本会在缺少 `.env` 时从 `.env.example` 复制一份，创建 `.venv`，安装后端依赖，安装前端依赖，并同时启动：
+
+- API: `http://127.0.0.1:8000`
+- Web: `http://127.0.0.1:5173`
+
+如需手动启动，后端：
+
+```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -153,6 +164,25 @@ npm run dev
 ```
 
 打开 Vite 输出的本地地址后，可使用 `Tesla`、`NVDA`、`腾讯` 或 `贵州茅台` 验证检索、行情和报告流程。开发模式使用 mock LLM/search，适合功能演示和代码评审；实时行情仍依赖外部免费数据源，接口会通过数据质量字段标记限流、缺失或降级情况。
+
+### Docker Compose 演示
+
+如果本机已安装 Docker，也可以用 Compose 一次启动后端和前端：
+
+```bash
+docker compose up --build
+```
+
+默认使用开发模式 `mock` LLM/search，适合快速查看网页演示：
+
+- API: `http://localhost:8000`
+- Web: `http://localhost:5173`
+
+停止服务：
+
+```bash
+docker compose down
+```
 
 ### 后端
 
@@ -203,6 +233,20 @@ VITE_API_BASE=https://api.deepalpha.best
 4. 创建报告任务，等待多 Agent 工作流生成 Markdown 报告。
 5. 查看报告正文、历史记录、报告追问和来源质量提示。
 6. 使用 Watchlist 导入或保存关注标的。
+
+### 前端预览
+
+市场复盘：
+
+![DeepAlpha 市场复盘](docs/images/deepalpha-market-review.png)
+
+投研工作台：
+
+![DeepAlpha 工作台](docs/images/deepalpha-workbench.png)
+
+报告视图：
+
+![DeepAlpha 报告视图](docs/images/deepalpha-report.png)
 
 ## 报告输出示例
 
@@ -626,7 +670,13 @@ Docker 本地运行：
 
 ```bash
 docker build -t deepalpha .
-docker run --env-file .env -p 8000:8000 deepalpha
+docker run --env-file .env -e PORT=8000 -p 8000:8000 deepalpha
+```
+
+前后端一起本地演示推荐使用：
+
+```bash
+docker compose up --build
 ```
 
 ## 安全与仓库规范
